@@ -1334,13 +1334,37 @@
   }
 
   // ── IsaDora (Next.js headless; one URL per variant) ────────────────────────
-  // Each shade is its own page. The static HTML only carries the CURRENT variant's
-  // data (name, GTIN, images, description). The full variant list (shades, prices,
-  // swatch images) is rendered client-side by Next.js hydration.
-  //
-  // In *active-tab mode* the scraper opens the variant dropdown via DOM interaction
-  // and reads all options. In URL/headless mode it falls back to a single-variant row
-  // using what the server-rendered HTML provides.
+  // Each shade is its own SSR'd page with __NEXT_DATA__ containing per-variant
+  // data (EAN, color hex, swatch, images) and slugData listing ALL site pages.
+  // The scraper finds variants by filtering slugData for direct children of the
+  // parent product slug, then fetches each variant's page to extract its unique
+  // product images and metadata — the same approach L'Oréal uses.
+
+  const ISADORA_ORIGIN = 'https://www.isadora.com';
+  const ISADORA_DAM_BASE = 'https://isadora-damassets-prod-e6hda3fpf0g6c7gk.a03.azurefd.net/img/';
+
+  function isadoraNextData(html) {
+    const m = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+    if (!m) return null;
+    try {
+      const data = JSON.parse(m[1]);
+      const content = data.props && data.props.pageProps && data.props.pageProps.content;
+      if (!content) return null;
+      return {
+        fullSlug: content.full_slug || '',
+        data: content.content || {},
+        slugData: (data.props.pageProps.slugData) || [],
+      };
+    } catch (e) { return null; }
+  }
+
+  function isadoraCarouselImages(html) {
+    const imgSet = new Set();
+    const re = /srcset="(https:\/\/isadora-damassets[^"]+\.(?:jpg|png|webp))\?w=\d+/g;
+    let m;
+    while ((m = re.exec(html)) !== null) imgSet.add(m[1]);
+    return [...imgSet];
+  }
 
   async function scrapeIsadora(ctx) {
     const html = ctx.mainHtml; const url = ctx.url;
@@ -1383,95 +1407,54 @@
     else if (bcTexts.length > 1) categories = bcTexts.slice(0, -1).join(', ');
 
     // ── 6. Parent gallery images (carousel srcset, deduplicated) ──────────────
-    const parentImages = [...new Set(
-      [...html.matchAll(/srcset="(https:\/\/isadora-damassets[^"]+\.(?:jpg|png|webp))\?w=\d+/g)].map(m => m[1])
-    )];
+    const parentImages = isadoraCarouselImages(html);
 
-    // ── 7. Variant extraction ─────────────────────────────────────────────────
+    // ── 7. Variant extraction: fetch each variant's own URL page ─────────────
+    // Like L'Oréal: every shade has its own SSR'd page with __NEXT_DATA__
+    // containing per-variant EAN, color hex, swatch, and product images.
     let variants = [];
 
-    // 7a. Active-tab mode: open the client-rendered dropdown, collect variants,
-    //     then click each variant to capture its carousel images.
-    //     Swatch images and variant product images are DIFFERENT assets on IsaDora,
-    //     so we must load each variant's page to get its correct product images.
-    if (typeof document !== 'undefined' && document.querySelector) {
-      try {
-        const toggle = document.querySelector('[class*="variant-dropdown_dropdown-toggle"]');
-        if (toggle) {
-          // ── PHASE 1: Open dropdown, collect all variant names + swatches ──
-          toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-          await new Promise(r => setTimeout(r, 600));
+    const nextData = isadoraNextData(html);
+    if (nextData) {
+      const parentSlug = nextData.fullSlug.substring(0, nextData.fullSlug.lastIndexOf('/'));
+      const parentSegments = parentSlug.split('/').length;
 
-          const seen = new Set();
-          let options = document.querySelectorAll(
-            '[role="option"], [role="listbox"] > *, [class*="dropdown-content"] > *, [class*="variant-dropdown"] [class*="option"], [class*="variant-dropdown"] button'
-          );
-          if (!options.length) {
-            const dropdown = document.querySelector('[role="listbox"], [class*="dropdown-content"], [aria-expanded="true"]');
-            if (dropdown) options = dropdown.querySelectorAll('button, a, [class*="item"], [class*="option"], [class*="link"]');
-          }
-          if (!options.length) {
-            options = document.querySelectorAll('button, [role="button"], a[href]');
-            options = [...options].filter(o => {
-              const t = (o.textContent || '').trim();
-              return t && /\d+/.test(t) && !/review|ingredient|share|cart|buy|add|save/i.test(t) && t.length < 50;
-            });
-          }
+      // Filter slugData for direct variant children of this product
+      const variantMeta = nextData.slugData.filter(s =>
+        s.slug.startsWith(parentSlug + '/') && s.slug.split('/').length === parentSegments + 1
+      );
 
-          // Build list of { name, swatch } for all variants
-          const variantEntries = [];
-          for (const opt of options) {
-            const name = (opt.textContent || '').replace(/\s+/g, ' ').trim();
-            if (!name || seen.has(name) || name.length < 3 || name.length > 60) continue;
-            if (/^(SEK|kr|€|\$)/i.test(name) || /^(buy|add|save|share|review|cart)/i.test(name)) continue;
-            seen.add(name);
-            const img = opt.querySelector('img');
-            const swatchSrc = img ? (img.getAttribute('src') || img.getAttribute('srcset') || '').split(/[? ]/)[0] : '';
-            variantEntries.push({ name, swatch: swatchSrc });
-          }
+      if (variantMeta.length) {
+        const norm = u => u.replace(/\/$/, '');
+        for (const v of variantMeta) {
+          try {
+            const varUrl = ISADORA_ORIGIN + '/' + v.slug;
+            // Reuse main HTML when URL matches the already-loaded page
+            const pageHtml = norm(varUrl) === norm(ctx.url) ? html : await ctx.fetchText(varUrl);
+            const varNext = isadoraNextData(pageHtml);
+            const images = isadoraCarouselImages(pageHtml);
 
-          // Close the dropdown after Phase 1
-          toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-          await new Promise(r => setTimeout(r, 300));
-
-          // ── PHASE 2: Click each variant to load its carousel, then scrape ──
-          for (const entry of variantEntries) {
-            let varImages = [];
-            try {
-              const t2 = document.querySelector('[class*="variant-dropdown_dropdown-toggle"]');
-              if (!t2) break;
-              t2.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-              await new Promise(r => setTimeout(r, 400));
-
-              const freshOptions = document.querySelectorAll(
-                '[role="option"], [role="listbox"] > *, [class*="dropdown-content"] > *, [class*="variant-dropdown"] [class*="option"], [class*="variant-dropdown"] button'
-              );
-              for (const fo of freshOptions) {
-                const foName = (fo.textContent || '').replace(/\s+/g, ' ').trim();
-                if (foName === entry.name) {
-                  fo.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-                  await new Promise(r => setTimeout(r, 800));
-                  break;
-                }
-              }
-
-              // Scrape carousel images for this variant
-              const imgSet = new Set();
-              const re = /srcset="(https:\/\/isadora-damassets[^"]+\.(?:jpg|png|webp))\?w=\d+/g;
-              let m;
-              while ((m = re.exec(document.documentElement.innerHTML)) !== null) {
-                imgSet.add(m[1]);
-              }
-              varImages = [...imgSet];
-            } catch (e) { /* skip this variant's images on error */ }
+            let sku = '', colorCode = '';
+            if (varNext && varNext.data) {
+              sku = varNext.data.ean || '';
+              const hex = varNext.data.color_hex_code || '';
+              const swatchImg = (varNext.data.swatch_image && varNext.data.swatch_image[0] && varNext.data.swatch_image[0].url) || '';
+              colorCode = swatchImg ? ISADORA_DAM_BASE + swatchImg.split('?')[0] : hex ? '#' + hex : '';
+            }
 
             variants.push({
-              name: entry.name, sku: '', regularPrice: '', salePrice: '',
-              images: varImages, extras: [], colorCode: entry.swatch,
+              name: v.name, sku, regularPrice: '', salePrice: '',
+              images, extras: [], colorCode,
+            });
+          } catch (e) {
+            // Push entry with name only (no images/EAN) so the variant is still listed
+            variants.push({
+              name: v.name, sku: '', regularPrice: '', salePrice: '',
+              images: [], extras: [], colorCode: '',
             });
           }
         }
-      } catch (e) { /* DOM interaction failed — fall back below */ }
+      }
     }
 
     // 7b. Fallback: single variant from the URL slug
