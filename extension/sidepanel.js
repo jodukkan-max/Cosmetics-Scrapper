@@ -299,8 +299,9 @@ function renderResults(title) {
         if (cc.startsWith('#')) return `<td><span class="swatch-dot" style="background:${escHtml(cc)}"></span> ${escHtml(cc)}</td>`;
         if (cc.startsWith('http')) return `<td><img src="${escHtml(cc)}" onerror="this.style.display='none'"></td>`;
       }
-      // Categories: multi-select dropdown for parent/simple rows, read-only for variations
-      if (col === 'Categories' && !isVar) {
+      // Categories: multi-select dropdown for parent/simple rows, empty for variations
+      if (col === 'Categories') {
+        if (isVar) return '<td></td>';
         const selected = String(row['Categories'] || '').split(',').map(s => s.trim()).filter(Boolean);
         const opts = flatCategoryOptions();
         const optionsHtml = opts.map(o => {
@@ -323,12 +324,6 @@ function renderResults(title) {
       if (!row) return;
       const vals = [...sel.selectedOptions].map(o => o.value);
       row['Categories'] = vals.join(', ');
-      // Propagate to child variations
-      for (const r of currentRows) {
-        if (r.Type === 'variation' && r.Parent && String(r.Parent) === 'id:' + rowId) {
-          r['Categories'] = row['Categories'];
-        }
-      }
     });
   });
 
