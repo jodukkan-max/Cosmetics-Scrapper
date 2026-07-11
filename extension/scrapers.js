@@ -1604,7 +1604,6 @@
 
     const productName = product.title || '';
     const description = (product.description || '').trim();
-    const optionName = (product.options && product.options[0]) || 'Color';
 
     // ── 2. Categories (product type from Shopify) ─────────────────────────────
     const categories = (product.type && product.type !== 'object') ? product.type : '';
@@ -1614,11 +1613,41 @@
     let shortDesc = metaDesc ? decodeEntities(metaDesc[1].trim()) : '';
     if (shortDesc === productName || shortDesc.length < 10) shortDesc = '';
 
-    // ── 4. Hex colour codes from swatch divs (order matches variant order) ────
-    let swatchHexes = [];
-    const swatchBlock = html.match(/class="[^"]*swatch[^"]*"[^>]*>([\s\S]*?)<\/div>/);
-    if (swatchBlock) {
-      swatchHexes = [...swatchBlock[1].matchAll(/#([0-9a-fA-F]{6})\b/g)].map(m => '#' + m[1]);
+    // ── 4. Swatch extraction: auto-detect colour vs image per variant ─────────
+    // Globo swatches have <li class="select-option"> elements inside
+    //   <ul class="value g-variant-color-detail">. Each <li> has:
+    //   - data-value="Cherry Jam - PT215.001"  (maps to variant option1)
+    //   - data-variantid="42813608951910"       (Shopify variant ID)
+    //   - <label class="... globo-border-color-swatch ..." style="background-color:#c60500">
+    //     OR
+    //   - <label class="... globo-border-image-swatch ..."><img src="...">
+    const swatchMap = new Map(); // shortName -> { type:'color', color }|{ type:'image', src }
+    const colorSwatchUl = html.match(/class="value g-variant-color-detail"[^>]*>([\s\S]*?)<\/ul>/);
+    if (colorSwatchUl) {
+      for (const li of colorSwatchUl[1].matchAll(/<li[^>]*>([\s\S]*?)<\/li>/g)) {
+        const block = li[0];
+        const dataValue = (block.match(/data-value="([^"]*)"/) || [])[1] || '';
+        // Strip SKU suffix to get the short variant name
+        const shortName = dataValue.replace(/\s*-\s*[A-Z]{2,}\d+.*$/, '').trim();
+        if (!shortName) continue;
+        // Detect swatch type from the label's class
+        if (/globo-border-color-swatch/.test(block)) {
+          const hex = (block.match(/background-color\s*:\s*(#[0-9a-fA-F]{3,8})/i) || [])[1] || '';
+          if (hex) swatchMap.set(shortName, { type: 'color', color: hex });
+        } else if (/globo-border-image-swatch/.test(block) || /<img\s[^>]*src=/.test(block)) {
+          const imgMatch = block.match(/<img[^>]*src="([^"]+)"/);
+          if (imgMatch) {
+            let src = imgMatch[1];
+            if (src.startsWith('//')) src = 'https:' + src;
+            swatchMap.set(shortName, { type: 'image', src: src.split('?')[0] });
+          }
+        }
+      }
+    }
+    // Determine the dominant swatch type (for attribute naming)
+    let swatchIsColor = true, swatchIsImage = false;
+    for (const s of swatchMap.values()) {
+      if (s.type === 'image') { swatchIsImage = true; swatchIsColor = false; break; }
     }
 
     // ── 5. Group media images by variant via alt text ──────────────────────────
@@ -1635,15 +1664,18 @@
     });
 
     // ── 6. Build variant rows ────────────────────────────────────────────────
-    const variants = (product.variants || []).map((v, idx) => {
+    const variants = (product.variants || []).map(v => {
       const name = (v.option1 || v.public_title || '').replace(/\s*-\s*[A-Z]{2,}\d+.*$/, '').trim();
       const price = v.price ? String(v.price / 100) : '';
       const compareAt = v.compare_at_price ? String(v.compare_at_price / 100) : '';
       const salePrice = (compareAt && compareAt !== price) ? price : '';
       const regularPrice = (compareAt && compareAt !== price) ? compareAt : price;
       const images = variantImagesMap.get(name) || [];
-      // Color code: hex from swatch div, falling back to empty
-      const colorCode = swatchHexes[idx] || '';
+      // Colour code or swatch image from the swatch map (keyed by short variant name)
+      const sw = swatchMap.get(name);
+      const colorCode = (sw && sw.type === 'color') ? sw.color
+        : (sw && sw.type === 'image') ? sw.src
+        : '';
 
       return {
         name, sku: v.sku || '',
@@ -1656,7 +1688,7 @@
     const parentImages = variants.length ? variants[0].images : [];
 
     return {
-      rows: variableRows(productName, parentImages, description, shortDesc, categories, optionName, variants),
+      rows: variableRows(productName, parentImages, description, shortDesc, categories, swatchIsImage ? 'Image' : 'Color', variants),
       title: productName,
     };
   }
