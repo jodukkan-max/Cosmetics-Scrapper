@@ -81,7 +81,7 @@ function renderCategories() {
         const children = catList.filter(ch => ch.parentId === c.id);
         return `<li class="cat-item" style="padding-left:${8 + depth * 20}px">
           <span class="cat-name">${escHtml(c.name)}</span>
-          <button class="cat-del-btn" data-id="${c.id}" title="Delete">✕</button>
+          <button class="cat-del-btn" data-id="${c.id}">Delete</button>
           ${children.length ? renderSub(children, depth + 1) : ''}
         </li>`;
       }).join('\n');
