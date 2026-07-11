@@ -185,7 +185,7 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sy
 .cat-form-row select { flex: 1; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 9px 10px; min-width: 0; }
 .cat-form-row select:focus { outline: none; border-color: var(--accent); }
 .cat-form-row select option { background: var(--surface); color: var(--text); }
-.cat-form-row button { flex-shrink: 0; }
+.cat-add-btn { width: 100%; margin-top: 6px; }
 .cat-list { margin: 0; }
 .cat-tree { list-style: none; padding: 0; margin: 0; }
 .cat-item { display: flex; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border); transition: background .15s; }
