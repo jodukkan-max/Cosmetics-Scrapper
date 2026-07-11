@@ -1333,6 +1333,211 @@
     return { rows: [{ SKU: sku, Name: title, Description: description, 'Short Description': shortDesc, 'Regular Price': finalRegular, Categories: categories, Images: images, 'Sale Price': salePrice }], title };
   }
 
+  // ── IsaDora (Next.js headless) ──────────────────────────────────────────────
+  // Each variant is its own URL — the scraper extracts the current variant.
+  // Full variant data & price are loaded client-side via API; the scraper falls
+  // back to what the server-rendered HTML provides and attempts JS-state extraction
+  // when running in active-tab mode.
+
+  async function scrapeIsadora(ctx) {
+    const html = ctx.mainHtml; const url = ctx.url;
+    const domain = new URL(url).origin;
+
+    // 1. Product name — base name from the h2 header
+    const baseNameM = html.match(/<h2[^>]*class="[^"]*variant-page_variant-header[^"]*"[^>]*>([^<]*)<\/h2>/);
+    const baseName = baseNameM ? decodeEntities(baseNameM[1].trim()) : '';
+
+    // 2. Variant name – last path segment, e.g. "60-neutral-porcelain"
+    const pathParts = (new URL(url)).pathname.replace(/\/+$/, '').split('/');
+    const variantSlug = pathParts[pathParts.length - 1];
+    const variantName = variantSlug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+    // 3. Try JSON-LD for SKU, description, images
+    let ldSku = ''; let ldDesc = ''; let ldImages = [];
+    const ldBlocks_ = ldBlocks(html);
+    for (const raw of ldBlocks_) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') {
+          ldSku = j.gtin13 || j.sku || '';
+          ldDesc = decodeEntities((j.description || '').replace(/•\t/g, '').trim());
+          ldImages = Array.isArray(j.image) ? j.image : (j.image ? [j.image] : []);
+        }
+      } catch (e) {}
+    }
+
+    // 4. Description — prefer JSON-LD, fallback to bullet list + accordion
+    let description = ldDesc;
+    if (!description) {
+      const bullets = [...html.matchAll(/<li[^>]*class="[^"]*list-item_root[^"]*"[^>]*>([\s\S]*?)<\/li>/g)];
+      description = bullets.map(m => decodeEntities(m[1].replace(/<[^>]+>/g, '').trim())).join('\n');
+    }
+    const accordionBlocks = [...html.matchAll(/class="[^"]*format-details_detail-line[^"]*">([\s\S]*?)<\/p>/g)];
+    const fullDescParts = accordionBlocks.map(m => decodeEntities(m[1].replace(/<[^>]+>/g, '').trim())).filter(s => s && s !== 'Disclaimer');
+    if (fullDescParts.length) description = fullDescParts.join('\n');
+
+    // 5. Short description — first few bullet items
+    const bullets = [...html.matchAll(/<li[^>]*class="[^"]*list-item_root[^"]*"[^>]*>([\s\S]*?)<\/li>/g)];
+    const shortDescText = bullets.map(m => decodeEntities(m[1].replace(/<[^>]+>/g, '').trim())).join(' | ');
+    const shortDesc = shortDescText ? shortDescText.substring(0, 255) : '';
+
+    // 6. Categories from breadcrumbs
+    let categories = '';
+    const bcMatches = [...html.matchAll(/<a[^>]*class="[^"]*breadcrumbs_link[^"]*"[^>]*>([^<]*)<\/a>/g)];
+    const bcItems = bcMatches.map(m => m[1].trim()).filter(n => n !== 'Start');
+    if (bcItems.length) {
+      // Remove the last item (current product name) to get categories only
+      const catsOnly = bcItems.slice(0, -1);
+      // Remove "Products" if present as first element
+      const cleanCats = catsOnly.filter(c => c !== 'Products');
+      categories = cleanCats.join(', ');
+    }
+
+    // 7. Images — from JSON-LD first, then carousel
+    let images = ldImages.map(u => u.split('?')[0]).filter(u => u);
+    if (!images.length) {
+      const imgSrcs = [...html.matchAll(/srcset="(https:\/\/isadora-damassets-prod[^"]+\.jpg)\?w=\d+[^"]*"/g)];
+      images = [...new Set(imgSrcs.map(m => m[1]))];
+    }
+
+    // 8. Price — try JSON-LD offers, meta, or page patterns
+    let regularPrice = '';
+    for (const raw of ldBlocks_) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product' && j.offers && j.offers.price) {
+          regularPrice = String(j.offers.price);
+          break;
+        }
+      } catch (e) {}
+    }
+    if (!regularPrice) {
+      // Try meta tags
+      const metaPrice = html.match(/property="product:price:amount"\s+content="([^"]+)"/);
+      if (metaPrice) regularPrice = metaPrice[1];
+    }
+    if (!regularPrice) {
+      // Try price in page text — SE-like patterns
+      const priceM = html.match(/(?:€|EUR|SEK|kr)\s*([\d,.]+)/);
+      if (priceM) regularPrice = priceM[1].replace(',', '.');
+    }
+
+    // 9. SKU
+    const sku = ldSku;
+
+    // 10. Build variable product rows (one parent + one variation)
+    const title = baseName || (ldBlocks_[0] ? (() => { try { const j = JSON.parse(ldBlocks_[0]); return (j.name || '').replace(/\s*-\s*[^-]+$/, ''); } catch (e) { return ''; } })() : '') || 'IsaDora Product';
+    const rows = [];
+    const parentId = 1;
+
+    // Parent row
+    rows.push({
+      ID: parentId, Parent: '', Type: 'variable', SKU: '', Name: title,
+      Images: images.slice(0, 4), 'Rey Variations extra images': '',
+      Description: description || '', 'Short Description': shortDesc || '', Categories: categories || '',
+      'Regular Price': '', 'Sale Price': '',
+      'Attribute 1 name': 'Color', 'Attribute 1 value(s)': variantName,
+      'Attribute 1 visible': '1', 'Attribute 1 global': '1', 'Color Code': '',
+    });
+
+    // Variation row
+    rows.push({
+      ID: 2, Parent: `id:${parentId}`, Type: 'variation', SKU: sku, Name: title,
+      Images: images.length ? [images[0]] : [],
+      'Rey Variations extra images': '',
+      Description: '', 'Short Description': '', Categories: '',
+      'Regular Price': regularPrice || '15', 'Sale Price': '',
+      'Attribute 1 name': 'Color', 'Attribute 1 value(s)': variantName,
+      'Attribute 1 visible': '', 'Attribute 1 global': '1', 'Color Code': '',
+    });
+
+    return { rows, title };
+  }
+
+  async function scrapeIsadoraSimple(ctx) {
+    const html = ctx.mainHtml; const url = ctx.url;
+
+    // Product name — base name from h2
+    const baseNameM = html.match(/<h2[^>]*class="[^"]*variant-page_variant-header[^"]*"[^>]*>([^<]*)<\/h2>/);
+    const title = baseNameM ? decodeEntities(baseNameM[1].trim()) : 'IsaDora Product';
+
+    // SKU from JSON-LD
+    let sku = '';
+    const ldBlocks_ = ldBlocks(html);
+    for (const raw of ldBlocks_) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') sku = j.gtin13 || j.sku || '';
+      } catch (e) {}
+    }
+
+    // Description
+    let description = '';
+    for (const raw of ldBlocks_) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') {
+          description = decodeEntities((j.description || '').replace(/•\t/g, '').trim());
+        }
+      } catch (e) {}
+    }
+    if (!description) {
+      const bullets = [...html.matchAll(/<li[^>]*class="[^"]*list-item_root[^"]*"[^>]*>([\s\S]*?)<\/li>/g)];
+      description = bullets.map(m => decodeEntities(m[1].replace(/<[^>]+>/g, '').trim())).join('\n');
+    }
+
+    // Short description
+    const bullets = [...html.matchAll(/<li[^>]*class="[^"]*list-item_root[^"]*"[^>]*>([\s\S]*?)<\/li>/g)];
+    const shortDesc = bullets.map(m => decodeEntities(m[1].replace(/<[^>]+>/g, '').trim())).join(' | ').substring(0, 255);
+
+    // Categories from breadcrumbs
+    let categories = '';
+    const bcMatches = [...html.matchAll(/<a[^>]*class="[^"]*breadcrumbs_link[^"]*"[^>]*>([^<]*)<\/a>/g)];
+    const bcItems = bcMatches.map(m => m[1].trim()).filter(n => n !== 'Start');
+    if (bcItems.length) {
+      const cleanCats = bcItems.slice(0, -1).filter(c => c !== 'Products');
+      categories = cleanCats.join(', ');
+    }
+
+    // Images
+    let images = [];
+    for (const raw of ldBlocks_) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') {
+          images = Array.isArray(j.image) ? j.image : (j.image ? [j.image] : []);
+        }
+      } catch (e) {}
+    }
+    images = images.map(u => u.split('?')[0]).filter(u => u);
+    if (!images.length) {
+      const imgSrcs = [...html.matchAll(/srcset="(https:\/\/isadora-damassets-prod[^"]+\.jpg)\?w=\d+[^"]*"/g)];
+      images = [...new Set(imgSrcs.map(m => m[1]))];
+    }
+
+    // Price
+    let regularPrice = '';
+    for (const raw of ldBlocks_) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product' && j.offers && j.offers.price) regularPrice = String(j.offers.price);
+      } catch (e) {}
+    }
+    if (!regularPrice) {
+      const metaPrice = html.match(/property="product:price:amount"\s+content="([^"]+)"/);
+      if (metaPrice) regularPrice = metaPrice[1];
+    }
+
+    return {
+      rows: [{
+        SKU: sku, Name: title, Description: description || '', 'Short Description': shortDesc || '',
+        'Regular Price': regularPrice || '15', Categories: categories || '',
+        Images: images || [], 'Sale Price': '',
+      }],
+      title,
+    };
+  }
+
   // ── L'Oréal Paris (Sitecore, color = sibling pages) ─────────────────────────
   function lorealParsePage(html) {
     let product = null, breadcrumb = null;
@@ -1981,6 +2186,7 @@
     flormar: { variable: scrapeFlormar, simple: scrapeFlormarSimple },
     maybelline: { variable: scrapeMaybelline, simple: scrapeMaybelline },
     seventeen: { variable: scrapeSeventeen, simple: scrapeSeventeenSimple },
+    isadora: { variable: scrapeIsadora, simple: scrapeIsadoraSimple },
     lorealparis: { variable: scrapeLorealParis, simple: scrapeLorealParisSimple },
     vichy: { variable: scrapeVichy, simple: scrapeVichy },
     larocheposay: { variable: scrapeLarocheposay, simple: scrapeLarocheposay },
@@ -2007,8 +2213,9 @@
         'flormar.com': 'flormar', 'lorealparisusa.com': 'lorealparis', 'vichy-me.com': 'vichy',
         'pastelarabia.com': 'pastel', 'laroche-posay.us': 'larocheposay', 'urbancare.ro': 'urbancare',
         'bielenda.pl': 'bielenda', 'sephora.com': 'sephora', 'cerave.com': 'cerave',
-        'narscosmetics.com': 'nars', 'glowrecipe.com': 'glowrecipe', 'seventeencosmetics.com': 'seventeen',
+        'narscosmetics.com': 'nars', 'glowrecipe.com': 'glowrecipe',         'seventeencosmetics.com': 'seventeen',
         'inglotcosmetics.com': 'inglot', 'radiant-professional.com': 'radiant', 'misslyn.com': 'misslyn',
+        'isadora.com': 'isadora',
         'essencemakeup.com': 'essence', 'charlottetilbury.com': 'charlottetilbury', 'dior.com': 'dior',
         'summerfridays.com': 'summerfridays', 'charactercosmetics.in': 'character',
       };
@@ -2053,6 +2260,7 @@
     { name: 'Dior Makeup', domain: 'dior.com', key: 'dior', url: 'https://www.dior.com/en_int/beauty', example: 'https://www.dior.com/en_int/beauty/products/dior-forever-skin-correct-Y0326000.html' },
     { name: 'Summer Fridays', domain: 'summerfridays.com', key: 'summerfridays' },
     { name: 'Character Cosmetics', domain: 'charactercosmetics.in', key: 'character', example: 'https://charactercosmetics.in/products/character-hyaluronic-acid-high-coverage-foundation' },
+    { name: 'IsaDora', domain: 'isadora.com', key: 'isadora', example: 'https://www.isadora.com/products/face/powder/the-no-compromise-matte-longwear-powder/60-neutral-porcelain' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key] }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };

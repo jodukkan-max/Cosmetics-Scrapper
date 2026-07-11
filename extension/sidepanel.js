@@ -301,6 +301,7 @@ async function editStore(id) {
 }
 async function deleteStore(id) { await setStores((await getStores()).filter(x => x.id !== id)); renderStores(); }
 
+// Global WP username -- shared across all stores.
 async function testStore(id, li) {
   const s = (await getStores()).find(x => x.id === id); if (!s) return;
   const badge = li.querySelector('.store-test'); badge.className = 'store-test'; badge.textContent = 'Testing...'; badge.classList.remove('hidden');
