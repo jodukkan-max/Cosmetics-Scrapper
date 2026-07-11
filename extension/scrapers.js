@@ -1580,6 +1580,182 @@
     };
   }
 
+  // ── MakeOver (ASP classic; image swatches via kuang divs + select dropdown) ──
+  // makeoverparis.com uses an old ASP-based catalogue. Each variable product
+  // has a <select id="yslist"> for choosing shade, with variant data embedded
+  // in hidden <div class="yskuang" id="kuang<num>"> blocks. Swatches are image
+  // type — the kuang div contains the full variant image.
+
+  function makeoverAbsUrl(src, base) {
+    if (!src) return '';
+    src = src.replace(/^\.\/MAKEOVER_files\//, 'uploadfile/');
+    if (src.startsWith('http')) return src;
+    return base.replace(/\/+$/, '') + '/' + src.replace(/^\/+/, '');
+  }
+
+  function makeoverImages(html, base, excludeSet) {
+    // Collect unique product images (not variant-specific swatches / kuang images).
+    const seen = new Set();
+    const out = [];
+    const re = /src="([^"]*(?:uploadfile\/[^"]*\.(?:jpg|jpeg|png|gif)))"/gi;
+    let m;
+    while ((m = re.exec(html))) {
+      const raw = makeoverAbsUrl(m[1], base);
+      if (!raw || seen.has(raw)) continue;
+      if (excludeSet && excludeSet.has(raw)) continue;
+      seen.add(raw);
+      out.push(raw);
+    }
+    return out;
+  }
+
+  async function scrapeMakeover(ctx) {
+    const html = ctx.mainHtml;
+    const base = new URL(ctx.url).origin;
+
+    // Find the variant select
+    const selectIdx = html.indexOf('<select id="yslist"');
+    if (selectIdx === -1) throw new Error('Not a MakeOver variable product page');
+
+    // ── Product name & SKU from text before the select ──
+    // Layout: "... Product Name  MODEL  PRICE  Choose a color"
+    const preChunk = html.slice(Math.max(0, selectIdx - 4000), selectIdx);
+    const preText = preChunk.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+
+    let name = '', sku = '';
+    // The SKU is a short (1-6 char) alphanumeric token before a price/currency token
+    const nameMatch = preText.match(/(.+?)\s+([A-Za-z0-9]{1,6})\s+[^\s]+\s*$/);
+    if (nameMatch) {
+      name = decodeEntities(nameMatch[1].replace(/\s*Choose a color$/i, '').trim());
+      sku = nameMatch[2];
+    }
+    // Fallback: use <title> or og:title
+    if (!name) {
+      const titleTag = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/) || [])[1] || '';
+      name = decodeEntities(titleTag.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+    if (!name) name = 'MakeOver Product';
+
+    // ── Category — look for a section header above this product ──
+    let categories = '';
+    // Try to find category from the URL query params
+    try {
+      const u = new URL(ctx.url);
+      if (u.searchParams.get('id1')) categories = 'MakeOver';
+    } catch (e) {}
+
+    // ── Variants from select options ──
+    const optRe = /<option[^>]*value="(\d+)"[^>]*>([^<]+)<\/option>/g;
+    const kuangImages = new Set(); // track variant images to exclude from parent gallery
+    const variants = [];
+    let opt;
+    while ((opt = optRe.exec(html))) {
+      const optId = opt[1];
+      const optName = decodeEntities(opt[2].trim());
+
+      // Find the kuang div for this variant (contains the full variant image)
+      const kuangRe = new RegExp(`id="kuang${optId}"[\\s\\S]*?<img[^>]*src="([^"]+)"`, '');
+      const kuangImgMatch = html.match(kuangRe);
+      let varImg = kuangImgMatch ? makeoverAbsUrl(kuangImgMatch[1], base) : '';
+
+      // Fallback: use imgid background-image (the small clickable swatch)
+      if (!varImg) {
+        const bgRe = new RegExp(`id="imgid${optId}"[^>]*background-image:url\\(([^)]+)\\)`);
+        const bgMatch = html.match(bgRe);
+        varImg = bgMatch ? makeoverAbsUrl(bgMatch[1], base) : '';
+      }
+
+      if (varImg) kuangImages.add(varImg);
+
+      variants.push({
+        name: optName,
+        sku: '',
+        regularPrice: '',
+        salePrice: '',
+        images: varImg ? [varImg] : [],
+        extras: [],
+        colorCode: varImg,  // image swatch — the kuang image IS the swatch
+      });
+    }
+
+    if (!variants.length) throw new Error('No variants found');
+
+    // ── Parent images — collect unique product images excluding variant ones ──
+    const parentSet = new Set();
+    // Mainpic
+    let mainpic = (html.match(/id="mainpic"[^>]*src="([^"]+)"/) || [])[1] || '';
+    mainpic = makeoverAbsUrl(mainpic, base);
+    if (mainpic && !kuangImages.has(mainpic)) parentSet.add(mainpic);
+
+    // Other product images (exclude kuang variant images and swatch thumbnails)
+    const allImgs = makeoverImages(html, base, null);
+    for (const img of allImgs) {
+      if (!kuangImages.has(img)) parentSet.add(img);
+    }
+    // Also look for images in saved-file format
+    const savedImgs = makeoverImages(html.replace(/\.\/MAKEOVER_files\//g, 'uploadfile/'), base, kuangImages);
+    for (const img of savedImgs) {
+      if (!kuangImages.has(img)) parentSet.add(img);
+    }
+
+    // ── Description ──
+    let description = '';
+    const descIdx = html.toLowerCase().indexOf('product detail');
+    if (descIdx !== -1) {
+      const descBlock = html.slice(descIdx, descIdx + 2000);
+      description = decodeEntities(descBlock.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+
+    return {
+      rows: variableRows(name, [...parentSet].slice(0, 4), description, '', categories, 'Image', variants),
+      title: name,
+    };
+  }
+
+  async function scrapeMakeoverSimple(ctx) {
+    const html = ctx.mainHtml;
+    const base = new URL(ctx.url).origin;
+
+    // Product name — from <title> or meta og:title
+    let name = '';
+    const ogTitle = (html.match(/property="og:title"\s+content="([^"]+)"/) || [])[1];
+    if (ogTitle) name = decodeEntities(ogTitle.trim());
+    if (!name) {
+      const titleTag = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/) || [])[1] || '';
+      name = decodeEntities(titleTag.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+    if (!name) name = 'MakeOver Product';
+
+    // SKU
+    let sku = '';
+    const skuMatch = html.match(/<span[^>]*id="sku"[^>]*>([^<]+)</);
+    if (skuMatch) sku = skuMatch[1].trim();
+    if (!sku) {
+      const m = html.match(/\b([A-Z]{1,3}\d{2,4})\b/);
+      if (m) sku = m[1];
+    }
+
+    // Images — mainpic + any gallery images
+    const parentSet = new Set();
+    let mainpic = (html.match(/id="mainpic"[^>]*src="([^"]+)"/) || [])[1] || '';
+    mainpic = makeoverAbsUrl(mainpic, base);
+    if (mainpic) parentSet.add(mainpic);
+
+    const allImgs = makeoverImages(html, base, null);
+    for (const img of allImgs) parentSet.add(img);
+
+    // Description
+    let description = '';
+    const descIdx = html.toLowerCase().indexOf('product detail');
+    if (descIdx !== -1) {
+      const descBlock = html.slice(descIdx, descIdx + 2000);
+      description = decodeEntities(descBlock.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+
+    return { rows: simpleRow({ sku, name, description, images: [...parentSet].slice(0, 10) }), title: name };
+  }
+
   // ── Topface (Shopify; GloboSwatchConfig.product for full product data) ─────
   // GloboSwatchConfig.product carries the complete Shopify product JSON
   // (images, media, variants with featured_image). Swatch hex codes are
@@ -2438,6 +2614,7 @@
     dior: { variable: scrapeDior, simple: scrapeDiorSimple },
     summerfridays: { variable: scrapeSummerfridays, simple: scrapeSummerfridaysSimple },
     character: { variable: scrapeCharacter, simple: scrapeCharacterSimple },
+    makeover: { variable: scrapeMakeover, simple: scrapeMakeoverSimple },
   };
 
   // Detect site from a URL hostname.
@@ -2455,6 +2632,7 @@
         'topfaceofficial.com': 'topface',
         'essencemakeup.com': 'essence', 'charlottetilbury.com': 'charlottetilbury', 'dior.com': 'dior',
         'summerfridays.com': 'summerfridays', 'charactercosmetics.in': 'character',
+        'makeoverparis.com': 'makeover',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -2499,6 +2677,7 @@
     { name: 'Character Cosmetics', domain: 'charactercosmetics.in', key: 'character', example: 'https://charactercosmetics.in/products/character-hyaluronic-acid-high-coverage-foundation' },
     { name: 'IsaDora', domain: 'isadora.com', key: 'isadora', example: 'https://www.isadora.com/products/face/powder/the-no-compromise-matte-longwear-powder/60-neutral-porcelain' },
     { name: 'Topface', domain: 'topfaceofficial.com', key: 'topface', example: 'https://topfaceofficial.com/products/aqua-tint-lip-cheek' },
+    { name: 'MakeOver', domain: 'makeoverparis.com', key: 'makeover', example: 'http://makeoverparis.com/en/products.asp?id1=1&id2=8&id3=32' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key] }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
