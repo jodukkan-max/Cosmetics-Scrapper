@@ -1618,19 +1618,38 @@
     if (selectIdx === -1) throw new Error('Not a MakeOver variable product page');
 
     // ── Product name & SKU from text before the select ──
-    // Layout: "... Product Name  MODEL  PRICE  Choose a color"
+    // The HTML has <script> blocks that can span beyond our window. Find the
+    // last </script> before the select, then extract text after it.
+    let name = '', sku = '';
     const preChunk = html.slice(Math.max(0, selectIdx - 4000), selectIdx);
-    const preText = preChunk.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ')
+    const lastScript = preChunk.lastIndexOf('</script>');
+    const textSrc = lastScript !== -1
+      ? preChunk.slice(lastScript + 9)
+      : preChunk.replace(/<script[\s\S]*?<\/script>/gi, '');
+    const preText = textSrc.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ')
       .replace(/\s+/g, ' ').trim();
 
-    let name = '', sku = '';
-    // The SKU is a short (1-6 char) alphanumeric token before a price/currency token
-    const nameMatch = preText.match(/(.+?)\s+([A-Za-z0-9]{1,6})\s+[^\s]+\s*$/);
-    if (nameMatch) {
-      name = decodeEntities(nameMatch[1].replace(/\s*Choose a color$/i, '').trim());
-      sku = nameMatch[2];
+    // The layout is: "Product Name  SKU  PRICE  Choose a color"
+    // Split by double spaces or scan tokens for the SKU (short alphanumeric)
+    const chooseIdx = preText.search(/choose\s+a?\s*color/i);
+    const before = (chooseIdx !== -1 ? preText.slice(0, chooseIdx) : preText).trim();
+    if (before) {
+      const tokens = before.split(/\s+/);
+      // SKU is a short code (e.g. "F37", "PT215") near the end, before price
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        const t = tokens[i].replace(/[£$€¥¤]/g, '').replace(/[^A-Za-z0-9]/g, '');
+        if (/^[A-Za-z0-9]{2,6}$/.test(t)) {
+          sku = t;
+          name = decodeEntities(tokens.slice(0, i).join(' '));
+          break;
+        }
+      }
+      if (!name) {
+        // Strip the last "Choose a color" token
+        name = decodeEntities(before.replace(/\s*choose\s+a?\s*color\s*$/i, '').trim()) || before;
+      }
     }
-    // Fallback: use <title> or og:title
+    // Fallback: <title>
     if (!name) {
       const titleTag = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/) || [])[1] || '';
       name = decodeEntities(titleTag.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
