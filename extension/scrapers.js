@@ -1671,57 +1671,51 @@
     } catch (e) {}
 
     // ── Variants from select options ──
+    // MakeOver products use the SAME main product image for all variants.
+    // The kuang div images are used only as swatches (colorCode), not variant images.
     const optRe = /<option[^>]*value="(\d+)"[^>]*>([^<]+)<\/option>/g;
-    const kuangImages = new Set(); // track variant images to exclude from parent gallery
+    const kuangImages = new Set();
     const variants = [];
     let opt;
     while ((opt = optRe.exec(html))) {
       const optId = opt[1];
       const optName = decodeEntities(opt[2].trim());
 
-      // Find the kuang div for this variant (contains the full variant image)
+      // Find the kuang div for this variant (used as the image swatch)
       const kuangRe = new RegExp(`id="kuang${optId}"[\\s\\S]*?<img[^>]*src="([^"]+)"`, '');
       const kuangImgMatch = html.match(kuangRe);
-      let varImg = kuangImgMatch ? makeoverAbsUrl(kuangImgMatch[1], pageUrl) : '';
+      let swatchImg = kuangImgMatch ? makeoverAbsUrl(kuangImgMatch[1], pageUrl) : '';
 
       // Fallback: use imgid background-image (the small clickable swatch)
-      if (!varImg) {
+      if (!swatchImg) {
         const bgRe = new RegExp(`id="imgid${optId}"[^>]*background-image:url\\(([^)]+)\\)`);
         const bgMatch = html.match(bgRe);
-        varImg = bgMatch ? makeoverAbsUrl(bgMatch[1], pageUrl) : '';
+        swatchImg = bgMatch ? makeoverAbsUrl(bgMatch[1], pageUrl) : '';
       }
 
-      if (varImg) kuangImages.add(varImg);
+      if (swatchImg) kuangImages.add(swatchImg);
 
       variants.push({
         name: optName,
         sku: '',
         regularPrice: '',
         salePrice: '',
-        images: varImg ? [varImg] : [],
+        images: [],  // filled below with the main product image
         extras: [],
-        colorCode: varImg,  // image swatch — the kuang image IS the swatch
+        colorCode: swatchImg,  // image swatch from kuang div
       });
     }
 
     if (!variants.length) throw new Error('No variants found');
 
-    // ── Parent images — collect unique product images excluding variant ones ──
-    const parentSet = new Set();
-    // Mainpic
+    // ── Product image — the mainpic is the only image, shared by all variants ──
     let mainpic = (html.match(/id="mainpic"[^>]*src="([^"]+)"/) || [])[1] || '';
     mainpic = makeoverAbsUrl(mainpic, pageUrl);
-    if (mainpic && !kuangImages.has(mainpic)) parentSet.add(mainpic);
+    const parentImages = mainpic ? [mainpic] : [];
 
-    // Other product images (exclude kuang variant images and swatch thumbnails)
-    const allImgs = makeoverImages(html, pageUrl, null);
-    for (const img of allImgs) {
-      if (!kuangImages.has(img)) parentSet.add(img);
-    }
-    // Also look for images in saved-file format
-    const savedImgs = makeoverImages(html.replace(/\.\/MAKEOVER_files\//g, 'uploadfile/'), pageUrl, kuangImages);
-    for (const img of savedImgs) {
-      if (!kuangImages.has(img)) parentSet.add(img);
+    // All variants share the same main product image
+    for (const v of variants) {
+      if (mainpic) v.images = [mainpic];
     }
 
     // ── Description ──
@@ -1733,7 +1727,7 @@
     }
 
     return {
-      rows: variableRows(name, [...parentSet].slice(0, 4), description, '', categories, 'Image', variants),
+      rows: variableRows(name, parentImages, description, '', categories, 'Image', variants),
       title: name,
     };
   }
