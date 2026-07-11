@@ -1333,153 +1333,194 @@
     return { rows: [{ SKU: sku, Name: title, Description: description, 'Short Description': shortDesc, 'Regular Price': finalRegular, Categories: categories, Images: images, 'Sale Price': salePrice }], title };
   }
 
-  // ── IsaDora (Next.js headless) ──────────────────────────────────────────────
-  // Each variant is its own URL — the scraper extracts the current variant.
-  // Full variant data & price are loaded client-side via API; the scraper falls
-  // back to what the server-rendered HTML provides and attempts JS-state extraction
-  // when running in active-tab mode.
+  // ── IsaDora (Next.js headless; one URL per variant) ────────────────────────
+  // Each shade is its own page. The static HTML only carries the CURRENT variant's
+  // data (name, GTIN, images, description). The full variant list (shades, prices,
+  // swatch images) is rendered client-side by Next.js hydration.
+  //
+  // In *active-tab mode* the scraper opens the variant dropdown via DOM interaction
+  // and reads all options. In URL/headless mode it falls back to a single-variant row
+  // using what the server-rendered HTML provides.
 
   async function scrapeIsadora(ctx) {
     const html = ctx.mainHtml; const url = ctx.url;
-    const domain = new URL(url).origin;
 
-    // 1. Product name — base name from the h2 header
+    // ── 1. Base product name (h2, no variant suffix) ──────────────────────────
     const baseNameM = html.match(/<h2[^>]*class="[^"]*variant-page_variant-header[^"]*"[^>]*>([^<]*)<\/h2>/);
     const baseName = baseNameM ? decodeEntities(baseNameM[1].trim()) : '';
 
-    // 2. Variant name – last path segment, e.g. "60-neutral-porcelain"
-    const pathParts = (new URL(url)).pathname.replace(/\/+$/, '').split('/');
-    const variantSlug = pathParts[pathParts.length - 1];
-    const variantName = variantSlug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-
-    // 3. Try JSON-LD for SKU, description, images
-    let ldSku = ''; let ldDesc = ''; let ldImages = [];
-    const ldBlocks_ = ldBlocks(html);
-    for (const raw of ldBlocks_) {
+    // ── 2. SKU (GTIN from JSON-LD on the current-variant page) ───────────────
+    let sku = '';
+    for (const raw of ldBlocks(html)) {
       try {
         const j = JSON.parse(raw);
-        if (j['@type'] === 'Product') {
-          ldSku = j.gtin13 || j.sku || '';
-          ldDesc = decodeEntities((j.description || '').replace(/•\t/g, '').trim());
-          ldImages = Array.isArray(j.image) ? j.image : (j.image ? [j.image] : []);
-        }
+        if (j['@type'] === 'Product') { sku = j.gtin13 || j.sku || ''; break; }
       } catch (e) {}
     }
 
-    // 4. Description — prefer JSON-LD, fallback to bullet list + accordion
-    let description = ldDesc;
+    // ── 3. Description (accordion sections: Ingredients + How to use) ─────────
+    let description = '';
+    const accordionBlocks = [...html.matchAll(/class="[^"]*accordion_content[^"]*"[^>]*>([\s\S]*?)<\/div>/g)];
+    for (const m of accordionBlocks) {
+      const text = decodeEntities(m[1].replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim());
+      if (text && text.length > 5) description += (description ? '\n\n' : '') + text;
+    }
+    // Fallback: bullet point list
     if (!description) {
       const bullets = [...html.matchAll(/<li[^>]*class="[^"]*list-item_root[^"]*"[^>]*>([\s\S]*?)<\/li>/g)];
       description = bullets.map(m => decodeEntities(m[1].replace(/<[^>]+>/g, '').trim())).join('\n');
     }
-    const accordionBlocks = [...html.matchAll(/class="[^"]*format-details_detail-line[^"]*">([\s\S]*?)<\/p>/g)];
-    const fullDescParts = accordionBlocks.map(m => decodeEntities(m[1].replace(/<[^>]+>/g, '').trim())).filter(s => s && s !== 'Disclaimer');
-    if (fullDescParts.length) description = fullDescParts.join('\n');
 
-    // 5. Short description — first few bullet items
+    // ── 4. Short description (bullet points, joined) ──────────────────────────
     const bullets = [...html.matchAll(/<li[^>]*class="[^"]*list-item_root[^"]*"[^>]*>([\s\S]*?)<\/li>/g)];
-    const shortDescText = bullets.map(m => decodeEntities(m[1].replace(/<[^>]+>/g, '').trim())).join(' | ');
-    const shortDesc = shortDescText ? shortDescText.substring(0, 255) : '';
+    const shortDesc = bullets.map(m => decodeEntities(m[1].replace(/<[^>]+>/g, '').trim())).join(' | ');
 
-    // 6. Categories from breadcrumbs
+    // ── 5. Categories (breadcrumbs, skipping Start / Products / product name / variant) ──
     let categories = '';
-    const bcMatches = [...html.matchAll(/<a[^>]*class="[^"]*breadcrumbs_link[^"]*"[^>]*>([^<]*)<\/a>/g)];
-    const bcItems = bcMatches.map(m => m[1].trim()).filter(n => n !== 'Start');
-    if (bcItems.length) {
-      // Remove the last item (current product name) to get categories only
-      const catsOnly = bcItems.slice(0, -1);
-      // Remove "Products" if present as first element
-      const cleanCats = catsOnly.filter(c => c !== 'Products');
-      categories = cleanCats.join(', ');
-    }
+    const bcMatches = [...html.matchAll(/<a[^>]*class="[^"]*breadcrumbs_link[^"]*"[^>]*href="[^"]*"[^>]*>([^<]*)<\/a>/g)];
+    const bcTexts = bcMatches.map(m => m[1].trim()).filter(t => t && t !== 'Start' && t !== 'Products');
+    if (bcTexts.length > 2) categories = bcTexts.slice(0, -2).join(', ');
+    else if (bcTexts.length > 1) categories = bcTexts.slice(0, -1).join(', ');
 
-    // 7. Images — from JSON-LD first, then carousel
-    let images = ldImages.map(u => u.split('?')[0]).filter(u => u);
-    if (!images.length) {
-      const imgSrcs = [...html.matchAll(/srcset="(https:\/\/isadora-damassets-prod[^"]+\.jpg)\?w=\d+[^"]*"/g)];
-      images = [...new Set(imgSrcs.map(m => m[1]))];
-    }
+    // ── 6. Parent gallery images (carousel srcset, deduplicated) ──────────────
+    const parentImages = [...new Set(
+      [...html.matchAll(/srcset="(https:\/\/isadora-damassets[^"]+\.(?:jpg|png|webp))\?w=\d+/g)].map(m => m[1])
+    )];
 
-    // 8. Price — try JSON-LD offers, meta, or page patterns
-    let regularPrice = '';
-    for (const raw of ldBlocks_) {
+    // ── 7. Variant extraction ─────────────────────────────────────────────────
+    let variants = [];
+
+    // 7a. Active-tab mode: open the client-rendered dropdown and read all options
+    if (typeof document !== 'undefined' && document.querySelector) {
       try {
-        const j = JSON.parse(raw);
-        if (j['@type'] === 'Product' && j.offers && j.offers.price) {
-          regularPrice = String(j.offers.price);
-          break;
+        const toggle = document.querySelector('[class*="variant-dropdown_dropdown-toggle"]');
+        if (toggle) {
+          // Open the dropdown
+          toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          await new Promise(r => setTimeout(r, 600));
+
+          // Collect variant options (try multiple selectors for resilience)
+          const seen = new Set();
+          // Strategy A: explicit <button> or <div> options inside the dropdown
+          let options = document.querySelectorAll(
+            '[role="option"], [role="listbox"] > *, [class*="dropdown-content"] > *, [class*="variant-dropdown"] [class*="option"], [class*="variant-dropdown"] button'
+          );
+          if (!options.length) {
+            // Strategy B: any element inside the dropdown that looks like a shade item
+            const dropdown = document.querySelector('[role="listbox"], [class*="dropdown-content"], [aria-expanded="true"]');
+            if (dropdown) options = dropdown.querySelectorAll('button, a, [class*="item"], [class*="option"], [class*="link"]');
+          }
+          // Strategy C: brute-force all buttons/links near the toggle
+          if (!options.length) {
+            options = document.querySelectorAll('button, [role="button"], a[href]');
+            // Only keep those with text that looks like a shade name (contains a number and word)
+            options = [...options].filter(o => {
+              const t = (o.textContent || '').trim();
+              return t && /\d+/.test(t) && !/review|ingredient|share|cart|buy|add|save/i.test(t) && t.length < 50;
+            });
+          }
+
+          for (const opt of options) {
+            const name = (opt.textContent || '').replace(/\s+/g, ' ').trim();
+            if (!name || seen.has(name) || name.length < 3 || name.length > 60) continue;
+            // Filter out non-variant text (price-only, action buttons, etc.)
+            if (/^(SEK|kr|€|\$)/i.test(name) || /^(buy|add|save|share|review|cart)/i.test(name)) continue;
+            seen.add(name);
+
+            // Try to get the swatch image
+            const img = opt.querySelector('img');
+            const swatchSrc = img
+              ? (img.getAttribute('src') || img.getAttribute('srcset') || '').split(/[? ]/)[0]
+              : '';
+            // Also check background-image on swatch elements
+            let bgImg = '';
+            const swatchEl = opt.querySelector('[class*="swatch"]') || opt;
+            const style = swatchEl.getAttribute('style') || '';
+            const bgM = style.match(/url\(["']?([^)"']+)/);
+            if (bgM) bgImg = bgM[1].split('?')[0];
+
+            const swatch = swatchSrc || bgImg || '';
+            variants.push({
+              name, sku: '', regularPrice: '', salePrice: '',
+              images: swatch ? [swatch] : [], extras: [], colorCode: swatch,
+            });
+          }
+
+          // Close the dropdown
+          toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          await new Promise(r => setTimeout(r, 100));
+        }
+      } catch (e) { /* DOM interaction failed — fall back below */ }
+    }
+
+    // 7b. Fallback: single variant from the URL slug
+    if (!variants.length) {
+      const pathParts = (new URL(url)).pathname.replace(/\/+$/, '').split('/');
+      const variantSlug = pathParts[pathParts.length - 1];
+      const variantName = variantSlug
+        .split('-')
+        .map(w => w ? w.charAt(0).toUpperCase() + w.slice(1) : '')
+        .join(' ')
+        .replace(/\b(\d+)\b/g, '$1');  // preserve numbers like "60", "61"
+      variants = [{ name: variantName, sku, regularPrice: '', salePrice: '', images: [], extras: [], colorCode: '' }];
+    }
+
+    // ── 8. Price discovery (active-tab DOM first, then HTML fallback) ─────────
+    let regularPrice = '';
+    if (typeof document !== 'undefined' && document.querySelector) {
+      try {
+        // Try common price elements
+        for (const sel of ['[class*="price"]', '[class*="Price"]', '[class*="product-price"]', '.variant-price', '[itemprop="price"]']) {
+          const el = document.querySelector(sel);
+          if (el) {
+            const m = (el.textContent || '').match(/[\d,.]+/);
+            if (m) { regularPrice = String(parseFloat(m[0].replace(/,/g, '.'))); break; }
+          }
         }
       } catch (e) {}
     }
+    // HTML fallback
     if (!regularPrice) {
-      // Try meta tags
-      const metaPrice = html.match(/property="product:price:amount"\s+content="([^"]+)"/);
-      if (metaPrice) regularPrice = metaPrice[1];
-    }
-    if (!regularPrice) {
-      // Try price in page text — SE-like patterns
-      const priceM = html.match(/(?:€|EUR|SEK|kr)\s*([\d,.]+)/);
-      if (priceM) regularPrice = priceM[1].replace(',', '.');
+      const priceM = html.match(/(?:SEK|kr|€|EUR|USD)\s*([\d,.]+)/);
+      if (priceM) regularPrice = String(parseFloat(priceM[1].replace(/,/g, '.')));
     }
 
-    // 9. SKU
-    const sku = ldSku;
+    // Apply discovered price to variants (variableRows uses variant.regularPrice)
+    if (regularPrice) {
+      for (const v of variants) if (!v.regularPrice) v.regularPrice = regularPrice;
+    }
 
-    // 10. Build variable product rows (one parent + one variation)
-    const title = baseName || (ldBlocks_[0] ? (() => { try { const j = JSON.parse(ldBlocks_[0]); return (j.name || '').replace(/\s*-\s*[^-]+$/, ''); } catch (e) { return ''; } })() : '') || 'IsaDora Product';
-    const rows = [];
-    const parentId = 1;
-
-    // Parent row
-    rows.push({
-      ID: parentId, Parent: '', Type: 'variable', SKU: '', Name: title,
-      Images: images.slice(0, 4), 'Rey Variations extra images': '',
-      Description: description || '', 'Short Description': shortDesc || '', Categories: categories || '',
-      'Regular Price': '', 'Sale Price': '',
-      'Attribute 1 name': 'Color', 'Attribute 1 value(s)': variantName,
-      'Attribute 1 visible': '1', 'Attribute 1 global': '1', 'Color Code': '',
-    });
-
-    // Variation row
-    rows.push({
-      ID: 2, Parent: `id:${parentId}`, Type: 'variation', SKU: sku, Name: title,
-      Images: images.length ? [images[0]] : [],
-      'Rey Variations extra images': '',
-      Description: '', 'Short Description': '', Categories: '',
-      'Regular Price': regularPrice || '15', 'Sale Price': '',
-      'Attribute 1 name': 'Color', 'Attribute 1 value(s)': variantName,
-      'Attribute 1 visible': '', 'Attribute 1 global': '1', 'Color Code': '',
-    });
-
-    return { rows, title };
+    // ── 9. Build WooCommerce rows via the shared helper ────────────────────────
+    const title = baseName || 'IsaDora Product';
+    return {
+      rows: variableRows(title, parentImages, description, shortDesc, categories, 'Shade', variants),
+      title,
+    };
   }
 
   async function scrapeIsadoraSimple(ctx) {
     const html = ctx.mainHtml; const url = ctx.url;
 
-    // Product name — base name from h2
+    // Base product name with variant suffix from URL
     const baseNameM = html.match(/<h2[^>]*class="[^"]*variant-page_variant-header[^"]*"[^>]*>([^<]*)<\/h2>/);
-    const title = baseNameM ? decodeEntities(baseNameM[1].trim()) : 'IsaDora Product';
+    const baseName = baseNameM ? decodeEntities(baseNameM[1].trim()) : '';
+    const pathParts = (new URL(url)).pathname.replace(/\/+$/, '').split('/');
+    const variantSlug = pathParts[pathParts.length - 1];
+    const variantName = variantSlug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').replace(/\b(\d+)\b/g, '$1');
+    const title = baseName ? `${baseName} - ${variantName}` : `IsaDora ${variantName}`;
 
     // SKU from JSON-LD
     let sku = '';
-    const ldBlocks_ = ldBlocks(html);
-    for (const raw of ldBlocks_) {
-      try {
-        const j = JSON.parse(raw);
-        if (j['@type'] === 'Product') sku = j.gtin13 || j.sku || '';
-      } catch (e) {}
+    for (const raw of ldBlocks(html)) {
+      try { const j = JSON.parse(raw); if (j['@type'] === 'Product') { sku = j.gtin13 || j.sku || ''; break; } } catch (e) {}
     }
 
-    // Description
+    // Description (accordion)
     let description = '';
-    for (const raw of ldBlocks_) {
-      try {
-        const j = JSON.parse(raw);
-        if (j['@type'] === 'Product') {
-          description = decodeEntities((j.description || '').replace(/•\t/g, '').trim());
-        }
-      } catch (e) {}
+    const accordionBlocks = [...html.matchAll(/class="[^"]*accordion_content[^"]*"[^>]*>([\s\S]*?)<\/div>/g)];
+    for (const m of accordionBlocks) {
+      const text = decodeEntities(m[1].replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim());
+      if (text && text.length > 5) description += (description ? '\n\n' : '') + text;
     }
     if (!description) {
       const bullets = [...html.matchAll(/<li[^>]*class="[^"]*list-item_root[^"]*"[^>]*>([\s\S]*?)<\/li>/g)];
@@ -1488,52 +1529,37 @@
 
     // Short description
     const bullets = [...html.matchAll(/<li[^>]*class="[^"]*list-item_root[^"]*"[^>]*>([\s\S]*?)<\/li>/g)];
-    const shortDesc = bullets.map(m => decodeEntities(m[1].replace(/<[^>]+>/g, '').trim())).join(' | ').substring(0, 255);
+    const shortDesc = bullets.map(m => decodeEntities(m[1].replace(/<[^>]+>/g, '').trim())).join(' | ');
 
-    // Categories from breadcrumbs
+    // Categories
     let categories = '';
-    const bcMatches = [...html.matchAll(/<a[^>]*class="[^"]*breadcrumbs_link[^"]*"[^>]*>([^<]*)<\/a>/g)];
-    const bcItems = bcMatches.map(m => m[1].trim()).filter(n => n !== 'Start');
-    if (bcItems.length) {
-      const cleanCats = bcItems.slice(0, -1).filter(c => c !== 'Products');
-      categories = cleanCats.join(', ');
-    }
+    const bcMatches = [...html.matchAll(/<a[^>]*class="[^"]*breadcrumbs_link[^"]*"[^>]*href="[^"]*"[^>]*>([^<]*)<\/a>/g)];
+    const bcTexts = bcMatches.map(m => m[1].trim()).filter(t => t && t !== 'Start' && t !== 'Products');
+    if (bcTexts.length > 2) categories = bcTexts.slice(0, -2).join(', ');
+    else if (bcTexts.length > 1) categories = bcTexts.slice(0, -1).join(', ');
 
     // Images
     let images = [];
-    for (const raw of ldBlocks_) {
-      try {
-        const j = JSON.parse(raw);
-        if (j['@type'] === 'Product') {
-          images = Array.isArray(j.image) ? j.image : (j.image ? [j.image] : []);
-        }
-      } catch (e) {}
+    for (const raw of ldBlocks(html)) {
+      try { const j = JSON.parse(raw); if (j['@type'] === 'Product') { images = Array.isArray(j.image) ? j.image : (j.image ? [j.image] : []); break; } } catch (e) {}
     }
     images = images.map(u => u.split('?')[0]).filter(u => u);
     if (!images.length) {
-      const imgSrcs = [...html.matchAll(/srcset="(https:\/\/isadora-damassets-prod[^"]+\.jpg)\?w=\d+[^"]*"/g)];
-      images = [...new Set(imgSrcs.map(m => m[1]))];
+      images = [...new Set([...html.matchAll(/srcset="(https:\/\/isadora-damassets[^"]+\.(?:jpg|png|webp))\?w=\d+/g)].map(m => m[1]))];
     }
 
     // Price
     let regularPrice = '';
-    for (const raw of ldBlocks_) {
-      try {
-        const j = JSON.parse(raw);
-        if (j['@type'] === 'Product' && j.offers && j.offers.price) regularPrice = String(j.offers.price);
-      } catch (e) {}
+    for (const raw of ldBlocks(html)) {
+      try { const j = JSON.parse(raw); if (j['@type'] === 'Product' && j.offers && j.offers.price) { regularPrice = String(j.offers.price); break; } } catch (e) {}
     }
     if (!regularPrice) {
-      const metaPrice = html.match(/property="product:price:amount"\s+content="([^"]+)"/);
-      if (metaPrice) regularPrice = metaPrice[1];
+      const priceM = html.match(/(?:SEK|kr|€|EUR|USD)\s*([\d,.]+)/);
+      if (priceM) regularPrice = String(parseFloat(priceM[1].replace(/,/g, '.')));
     }
 
     return {
-      rows: [{
-        SKU: sku, Name: title, Description: description || '', 'Short Description': shortDesc || '',
-        'Regular Price': regularPrice || '15', Categories: categories || '',
-        Images: images || [], 'Sale Price': '',
-      }],
+      rows: simpleRow({ sku, name: title, description, shortDesc, categories, images, regularPrice }),
       title,
     };
   }
