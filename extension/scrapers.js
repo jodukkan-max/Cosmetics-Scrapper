@@ -1440,9 +1440,13 @@
             if (bgM) bgImg = bgM[1].split('?')[0];
 
             const swatch = swatchSrc || bgImg || '';
+            // Convert swatch thumbnail to full-size variant image
+            // Swatch: .../2408271412-7333352084897_swatch.jpg
+            // Variant: .../2408271412-7333352084897.jpg
+            const variantImg = swatch ? swatch.replace(/_swatch(\.(?:jpg|png|webp))/, '$1') : '';
             variants.push({
               name, sku: '', regularPrice: '', salePrice: '',
-              images: swatch ? [swatch] : [], extras: [], colorCode: swatch,
+              images: variantImg ? [variantImg] : [], extras: [], colorCode: swatch,
             });
           }
 
@@ -1493,7 +1497,7 @@
     // ── 9. Build WooCommerce rows via the shared helper ────────────────────────
     const title = baseName || 'IsaDora Product';
     return {
-      rows: variableRows(title, parentImages, description, shortDesc, categories, 'Shade', variants),
+      rows: variableRows(title, parentImages, description, shortDesc, categories, 'Image', variants),
       title,
     };
   }
