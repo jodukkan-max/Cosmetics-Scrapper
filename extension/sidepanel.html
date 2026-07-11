@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cosmetics Scraper</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header class="sp-header">
+    <h1>Cosmetics Scraper</h1>
+    <div class="sp-tabs">
+      <button id="tab-products" class="sp-tab active" data-tab="products">Products</button>
+      <button id="tab-bulk" class="sp-tab" data-tab="bulk">Bulk <span id="bulk-tab-count" class="bulk-tab-count">(0)</span></button>
+      <button id="tab-stores" class="sp-tab" data-tab="stores">Stores</button>
+    </div>
+  </header>
+
+  <!-- Products panel -->
+  <section id="panel-products" class="sp-panel">
+    <div class="type-toggle">
+      <button class="type-btn active" id="type-variable">Variable</button>
+      <button class="type-btn" id="type-simple">Simple</button>
+    </div>
+
+    <div id="site-hint" class="site-hint"></div>
+    <button id="scrape-page-btn" class="primary-btn">Scrape this page</button>
+
+    <div class="or-row"><span>or paste a URL</span></div>
+
+    <div class="url-row">
+      <input type="url" id="product-url" placeholder="Paste a product URL..." />
+      <button id="scrape-url-btn">Go</button>
+    </div>
+    <p class="hint">Bot-protected sites (Sephora, La&nbsp;Roche-Posay) work best with "Scrape this page".</p>
+
+    <div id="status" class="status hidden"></div>
+
+    <!-- Results table -->
+    <div id="results" class="results hidden">
+      <div class="results-head">
+        <span id="result-title"></span>
+        <span id="result-count" class="muted"></span>
+      </div>
+      <div class="results-actions">
+        <button id="copy-btn">Copy</button>
+        <button id="csv-btn">CSV</button>
+        <button id="save-btn">+ Bulk</button>
+        <button id="import-btn" class="woo-btn">Import</button>
+      </div>
+
+      <div id="import-box" class="import-box hidden">
+        <div class="import-box-head">Import to store(s):</div>
+        <div id="store-select" class="store-select"></div>
+        <button id="do-import-btn" class="woo-btn">Import to selected</button>
+        <div id="import-status" class="status hidden"></div>
+      </div>
+
+      <div id="select-bar" class="select-bar hidden">
+        <button id="sel-all">Select all</button>
+        <button id="sel-none">Select none</button>
+        <label class="sel-default"><input type="checkbox" id="default-all" /> Pre-select all on new scrapes</label>
+        <label class="sel-default"><input type="checkbox" id="default-first2" /> Pre-select 2 first variants</label>
+      </div>
+
+      <div class="table-wrap">
+        <table id="data-table"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+      </div>
+    </div>
+
+    <!-- Discover panel -->
+    <div id="discover-panel" class="discover-panel hidden">
+      <div class="discover-panel-head">
+        <span class="discover-panel-title" id="discover-brand-name"></span>
+        <button id="discover-close-btn" class="discover-close-btn">x</button>
+      </div>
+      <div id="discover-progress" class="hidden">
+        <div class="discover-progress-bar">
+          <div id="discover-progress-fill" class="discover-progress-fill"></div>
+        </div>
+        <div id="discover-progress-text" class="muted"></div>
+      </div>
+      <div id="discover-results" class="hidden">
+        <div class="results-head">
+          <span id="discover-result-title"></span>
+          <span id="discover-result-count" class="muted"></span>
+        </div>
+        <div class="results-actions">
+          <button id="discover-csv-btn">Export CSV</button>
+          <button id="discover-expand-btn">Expand all</button>
+          <button id="discover-collapse-btn">Collapse all</button>
+        </div>
+        <div id="discover-tree" class="discover-tree"></div>
+      </div>
+      <div id="discover-status" class="status hidden"></div>
+    </div>
+
+    <!-- Brands -->
+    <div class="brands">
+      <div class="brands-title">Brands</div>
+      <ul id="brands-list" class="brands-list"></ul>
+    </div>
+  </section>
+
+  <!-- Bulk panel -->
+  <section id="panel-bulk" class="sp-panel hidden">
+    <div id="bulk-empty" class="bulk-empty">No products saved yet. Scrape a product and click <strong>+ Bulk</strong> to add it here.</div>
+    <div id="bulk-content" class="hidden">
+      <ul id="bulk-list" class="store-list"></ul>
+      <div class="results-actions" id="bulk-actions">
+        <button id="bulk-copy">Copy all</button>
+        <button id="bulk-csv">CSV all</button>
+        <button id="bulk-clear" class="del">Clear queue</button>
+      </div>
+      <button id="bulk-import-btn" class="bulk-import-btn">Import to website</button>
+      <div id="bulk-import-box" class="import-box hidden">
+        <div class="import-box-head">Select store:</div>
+        <div id="bulk-store-select" class="store-select"></div>
+        <button id="bulk-do-import" class="woo-btn">Import now</button>
+        <div id="bulk-import-status" class="status hidden"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stores panel -->
+  <section id="panel-stores" class="sp-panel hidden">
+    <div class="store-form">
+      <input type="text" id="store-name" placeholder="Store name" />
+      <input type="url" id="store-url" placeholder="https://store.com" />
+      <input type="text" id="store-authkey" placeholder="Auth key (4-digit)" autocomplete="off" />
+      <div class="store-form-actions">
+        <button id="store-save-btn" class="primary-btn">Save store</button>
+        <button id="store-cancel-btn" class="hidden">Cancel</button>
+      </div>
+      <div id="store-form-status" class="status hidden"></div>
+    </div>
+    <ul id="store-list" class="store-list"></ul>
+  </section>
+
+  <script src="scrapers.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>
