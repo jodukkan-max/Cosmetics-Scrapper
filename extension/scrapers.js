@@ -1586,21 +1586,27 @@
   // in hidden <div class="yskuang" id="kuang<num>"> blocks. Swatches are image
   // type — the kuang div contains the full variant image.
 
-  function makeoverAbsUrl(src, base) {
+  function makeoverAbsUrl(src, pageUrl) {
     if (!src) return '';
+    // Saved HTML uses ./MAKEOVER_files/ prefix; live site uses uploadfile/
     src = src.replace(/^\.\/MAKEOVER_files\//, 'uploadfile/');
-    if (src.startsWith('http')) return src;
-    return base.replace(/\/+$/, '') + '/' + src.replace(/^\/+/, '');
+    if (/^https?:\/\//.test(src)) return src;
+    try {
+      return new URL(src, pageUrl).href;
+    } catch (e) {
+      // Fallback: append to directory of page URL
+      return pageUrl.replace(/\/[^\/]*$/, '/' + src.replace(/^\/+/, ''));
+    }
   }
 
-  function makeoverImages(html, base, excludeSet) {
-    // Collect unique product images (not variant-specific swatches / kuang images).
+  function makeoverImages(html, pageUrl, excludeSet) {
+    // Collect unique uploadfile images from the page
     const seen = new Set();
     const out = [];
-    const re = /src="([^"]*(?:uploadfile\/[^"]*\.(?:jpg|jpeg|png|gif)))"/gi;
+    const re = /src=["']([^"']*(?:uploadfile\/[^"']*\.(?:jpg|jpeg|png|gif)))["']/gi;
     let m;
     while ((m = re.exec(html))) {
-      const raw = makeoverAbsUrl(m[1], base);
+      const raw = makeoverAbsUrl(m[1], pageUrl);
       if (!raw || seen.has(raw)) continue;
       if (excludeSet && excludeSet.has(raw)) continue;
       seen.add(raw);
@@ -1611,7 +1617,7 @@
 
   async function scrapeMakeover(ctx) {
     const html = ctx.mainHtml;
-    const base = new URL(ctx.url).origin;
+    const pageUrl = ctx.url;  // full page URL for resolving relative image paths
 
     // Find the variant select
     const selectIdx = html.indexOf('<select id="yslist"');
@@ -1676,13 +1682,13 @@
       // Find the kuang div for this variant (contains the full variant image)
       const kuangRe = new RegExp(`id="kuang${optId}"[\\s\\S]*?<img[^>]*src="([^"]+)"`, '');
       const kuangImgMatch = html.match(kuangRe);
-      let varImg = kuangImgMatch ? makeoverAbsUrl(kuangImgMatch[1], base) : '';
+      let varImg = kuangImgMatch ? makeoverAbsUrl(kuangImgMatch[1], pageUrl) : '';
 
       // Fallback: use imgid background-image (the small clickable swatch)
       if (!varImg) {
         const bgRe = new RegExp(`id="imgid${optId}"[^>]*background-image:url\\(([^)]+)\\)`);
         const bgMatch = html.match(bgRe);
-        varImg = bgMatch ? makeoverAbsUrl(bgMatch[1], base) : '';
+        varImg = bgMatch ? makeoverAbsUrl(bgMatch[1], pageUrl) : '';
       }
 
       if (varImg) kuangImages.add(varImg);
@@ -1704,16 +1710,16 @@
     const parentSet = new Set();
     // Mainpic
     let mainpic = (html.match(/id="mainpic"[^>]*src="([^"]+)"/) || [])[1] || '';
-    mainpic = makeoverAbsUrl(mainpic, base);
+    mainpic = makeoverAbsUrl(mainpic, pageUrl);
     if (mainpic && !kuangImages.has(mainpic)) parentSet.add(mainpic);
 
     // Other product images (exclude kuang variant images and swatch thumbnails)
-    const allImgs = makeoverImages(html, base, null);
+    const allImgs = makeoverImages(html, pageUrl, null);
     for (const img of allImgs) {
       if (!kuangImages.has(img)) parentSet.add(img);
     }
     // Also look for images in saved-file format
-    const savedImgs = makeoverImages(html.replace(/\.\/MAKEOVER_files\//g, 'uploadfile/'), base, kuangImages);
+    const savedImgs = makeoverImages(html.replace(/\.\/MAKEOVER_files\//g, 'uploadfile/'), pageUrl, kuangImages);
     for (const img of savedImgs) {
       if (!kuangImages.has(img)) parentSet.add(img);
     }
@@ -1734,7 +1740,7 @@
 
   async function scrapeMakeoverSimple(ctx) {
     const html = ctx.mainHtml;
-    const base = new URL(ctx.url).origin;
+    const pageUrl = ctx.url;
 
     // Product name — from <title> or meta og:title
     let name = '';
@@ -1758,10 +1764,10 @@
     // Images — mainpic + any gallery images
     const parentSet = new Set();
     let mainpic = (html.match(/id="mainpic"[^>]*src="([^"]+)"/) || [])[1] || '';
-    mainpic = makeoverAbsUrl(mainpic, base);
+    mainpic = makeoverAbsUrl(mainpic, pageUrl);
     if (mainpic) parentSet.add(mainpic);
 
-    const allImgs = makeoverImages(html, base, null);
+    const allImgs = makeoverImages(html, pageUrl, null);
     for (const img of allImgs) parentSet.add(img);
 
     // Description
