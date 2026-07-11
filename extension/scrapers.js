@@ -1580,77 +1580,83 @@
     };
   }
 
-  // ── Topface (Shopify; variant JSON inline in script tag) ───────────────────
-  // The page embeds a Shopify product variants array as JSON in a <script> tag
-  // ([{"id":…,"featured_image":{…},"price":350,…},…]). JSON-LD carries name/desc.
+  // ── Topface (Shopify; GloboSwatchConfig.product for full product data) ─────
+  // GloboSwatchConfig.product carries the complete Shopify product JSON
+  // (images, media, variants with featured_image). Swatch hex codes are
+  // found in <div class="swatch"> elements. Option name from product.options.
 
   async function scrapeTopface(ctx) {
     const html = ctx.mainHtml;
 
-    // ── 1. Parse variant JSON from script tag ──────────────────────────────────
-    let variantsData = null;
-    for (const m of html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)) {
-      const s = m[1].trim();
-      if (s.startsWith('[{') && s.includes('"sku"') && s.includes('"featured_image"')) {
-        try { variantsData = JSON.parse(s); break; } catch (e) {}
+    // ── 1. Parse GloboSwatchConfig.product JSON (complete product data) ────────
+    let product = null;
+    const gscM = html.match(/product:\s*(\{"id":\d+)/);
+    if (gscM) {
+      const i = html.indexOf(gscM[1], gscM.index);
+      let brace = 0, end = i;
+      for (let j = i; j < html.length; j++) {
+        if (html[j] === '{') brace++;
+        else if (html[j] === '}') { brace--; if (brace === 0) { end = j + 1; break; } }
       }
+      try { product = JSON.parse(html.slice(i, end)); } catch (e) {}
     }
-    if (!variantsData || !Array.isArray(variantsData) || !variantsData.length)
-      throw new Error('No Topface variant data found.');
+    if (!product) throw new Error('No Topface product data found.');
 
-    // ── 2. Product name from JSON-LD ──────────────────────────────────────────
-    let productName = '', description = '', productImages = [];
-    for (const raw of ldBlocks(html)) {
-      try {
-        const ld = JSON.parse(raw);
-        if (ld['@type'] === 'Product') {
-          productName = ld.name || '';
-          description = (ld.description || '').trim();
-          if (ld.image) {
-            productImages = Array.isArray(ld.image) ? ld.image : [ld.image];
-            productImages = productImages.map(u => typeof u === 'string' ? u.split('?')[0] : '').filter(Boolean);
-          }
-          break;
-        }
-      } catch (e) {}
-    }
+    const productName = product.title || '';
+    const description = (product.description || '').trim();
+    const optionName = (product.options && product.options[0]) || 'Color';
 
-    // ── 3. Categories (product type from Shopify meta) ────────────────────────
-    const typeM = html.match(/"type":"([^"]+)"/);
-    const categories = (typeM && typeM[1] && typeM[1] !== 'object') ? typeM[1] : '';
+    // ── 2. Categories (product type from Shopify) ─────────────────────────────
+    const categories = (product.type && product.type !== 'object') ? product.type : '';
 
-    // ── 4. Short description (empty on Topface PDPs — use meta description) ──
+    // ── 3. Short description (meta) ───────────────────────────────────────────
     const metaDesc = html.match(/<meta[^>]*property="og:description"[^>]*content="([^"]*)"/);
     let shortDesc = metaDesc ? decodeEntities(metaDesc[1].trim()) : '';
-    // Filter out store name as sole description
-    if (shortDesc && shortDesc === productName || shortDesc.length < 10) shortDesc = '';
+    if (shortDesc === productName || shortDesc.length < 10) shortDesc = '';
 
-    // ── 5. Build variant rows ────────────────────────────────────────────────
-    const variants = variantsData.map(v => {
-      const fi = v.featured_image;
-      const img = fi ? (fi.src || '').split('?')[0] : '';
-      const absImg = img.startsWith('//') ? 'https:' + img : img;
-      // Price is in cents → convert to decimal
+    // ── 4. Hex colour codes from swatch divs (order matches variant order) ────
+    let swatchHexes = [];
+    const swatchBlock = html.match(/class="[^"]*swatch[^"]*"[^>]*>([\s\S]*?)<\/div>/);
+    if (swatchBlock) {
+      swatchHexes = [...swatchBlock[1].matchAll(/#([0-9a-fA-F]{6})\b/g)].map(m => '#' + m[1]);
+    }
+
+    // ── 5. Group media images by variant via alt text ──────────────────────────
+    const variantImagesMap = new Map();
+    (product.media || []).forEach(m => {
+      if (!m || !m.alt || !m.src) return;
+      // alt is e.g. "Cherry Jam - PT215.001" — extract just the shade name
+      const name = m.alt.replace(/\s*-\s*[A-Z]{2,}\d+.*$/, '').trim();
+      let src = m.src;
+      if (src.startsWith('//')) src = 'https:' + src;
+      src = src.split('?')[0];
+      if (!variantImagesMap.has(name)) variantImagesMap.set(name, []);
+      variantImagesMap.get(name).push(src);
+    });
+
+    // ── 6. Build variant rows ────────────────────────────────────────────────
+    const variants = (product.variants || []).map((v, idx) => {
+      const name = (v.option1 || v.public_title || '').replace(/\s*-\s*[A-Z]{2,}\d+.*$/, '').trim();
       const price = v.price ? String(v.price / 100) : '';
-      // compare_at_price → sale if higher than price (otherwise no sale)
       const compareAt = v.compare_at_price ? String(v.compare_at_price / 100) : '';
       const salePrice = (compareAt && compareAt !== price) ? price : '';
       const regularPrice = (compareAt && compareAt !== price) ? compareAt : price;
-      // Variant name: strip trailing SKU (e.g. "Cherry Jam - PT215.001" → "Cherry Jam")
-      const name = (v.option1 || v.public_title || '').replace(/\s*-\s*[A-Z]{2,}\d+.*$/, '').trim();
+      const images = variantImagesMap.get(name) || [];
+      // Color code: hex from swatch div, falling back to empty
+      const colorCode = swatchHexes[idx] || '';
+
       return {
         name, sku: v.sku || '',
         regularPrice, salePrice,
-        images: absImg ? [absImg] : [],
-        extras: [], colorCode: absImg,
+        images, extras: [], colorCode,
       };
     });
 
-    // ── 6. Parent images (fall back to first variant image if no JSON-LD image) ──
-    const parentImages = productImages.length ? productImages : (variants[0] && variants[0].images || []);
+    // ── 7. Parent images (first variant's images) ─────────────────────────────
+    const parentImages = variants.length ? variants[0].images : [];
 
     return {
-      rows: variableRows(productName, parentImages, description, shortDesc, categories, 'Image', variants),
+      rows: variableRows(productName, parentImages, description, shortDesc, categories, optionName, variants),
       title: productName,
     };
   }
