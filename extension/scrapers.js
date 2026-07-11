@@ -1395,6 +1395,18 @@
       try {
         const toggle = document.querySelector('[class*="variant-dropdown_dropdown-toggle"]');
         if (toggle) {
+          // ── Capture currently-selected variant info BEFORE opening dropdown ──
+          // The carousel images on the page belong to the currently selected variant.
+          // Swatch images and variant product images are DIFFERENT assets on IsaDora,
+          // so deriving variant images from swatches (via _swatch stripping) is wrong.
+          // Instead, match the selected variant by name to the carousel images.
+          const selectedName = (toggle.textContent || '').replace(/\s+/g, ' ').trim();
+          // Also try to read selected name from the toggle's label span
+          let selNameFromToggle = '';
+          const labelEl = toggle.querySelector('[class*="typography-label"]');
+          if (labelEl) selNameFromToggle = (labelEl.textContent || '').replace(/\s+/g, ' ').trim();
+          const selMatchName = selNameFromToggle || selectedName;
+
           // Open the dropdown
           toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
           await new Promise(r => setTimeout(r, 600));
@@ -1427,26 +1439,30 @@
             if (/^(SEK|kr|€|\$)/i.test(name) || /^(buy|add|save|share|review|cart)/i.test(name)) continue;
             seen.add(name);
 
-            // Try to get the swatch image
+            // Determine variant images:
+            // - If this variant matches the currently-selected one, use the carousel
+            //   images from the page (they are the correct product images).
+            // - Otherwise leave images empty (swatch-derived URLs are unreliable).
+            let varImages = [];
+            if (name === selMatchName || name.startsWith(selMatchName) || selMatchName.startsWith(name)) {
+              varImages = parentImages.slice(0);
+            }
+
+            // Extract swatch for colorCode
             const img = opt.querySelector('img');
             const swatchSrc = img
               ? (img.getAttribute('src') || img.getAttribute('srcset') || '').split(/[? ]/)[0]
               : '';
-            // Also check background-image on swatch elements
             let bgImg = '';
             const swatchEl = opt.querySelector('[class*="swatch"]') || opt;
             const style = swatchEl.getAttribute('style') || '';
             const bgM = style.match(/url\(["']?([^)"']+)/);
             if (bgM) bgImg = bgM[1].split('?')[0];
-
             const swatch = swatchSrc || bgImg || '';
-            // Convert swatch thumbnail to full-size variant image
-            // Swatch: .../2408271412-7333352084897_swatch.jpg
-            // Variant: .../2408271412-7333352084897.jpg
-            const variantImg = swatch ? swatch.replace(/_swatch(\.(?:jpg|png|webp))/, '$1') : '';
+
             variants.push({
               name, sku: '', regularPrice: '', salePrice: '',
-              images: variantImg ? [variantImg] : [], extras: [], colorCode: swatch,
+              images: varImages, extras: [], colorCode: swatch,
             });
           }
 
@@ -1466,7 +1482,7 @@
         .map(w => w ? w.charAt(0).toUpperCase() + w.slice(1) : '')
         .join(' ')
         .replace(/\b(\d+)\b/g, '$1');  // preserve numbers like "60", "61"
-      variants = [{ name: variantName, sku, regularPrice: '', salePrice: '', images: [], extras: [], colorCode: '' }];
+      variants = [{ name: variantName, sku, regularPrice: '', salePrice: '', images: parentImages.slice(0), extras: [], colorCode: '' }];
     }
 
     // ── 8. Price discovery (active-tab DOM first, then HTML fallback) ─────────
@@ -1517,6 +1533,11 @@
     let sku = '';
     for (const raw of ldBlocks(html)) {
       try { const j = JSON.parse(raw); if (j['@type'] === 'Product') { sku = j.gtin13 || j.sku || ''; break; } } catch (e) {}
+    }
+    if (!sku) {
+      // Fallback: extract article number from URL (e.g., /10000319-the-buffer-brush)
+      const articleM = (new URL(url)).pathname.match(/\/(\d{4,})-/);
+      if (articleM) sku = articleM[1];
     }
 
     // Description (accordion)
