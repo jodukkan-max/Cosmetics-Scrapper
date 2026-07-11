@@ -1360,9 +1360,16 @@
 
   function isadoraCarouselImages(html) {
     const imgSet = new Set();
-    const re = /srcset="(https:\/\/isadora-damassets[^"]+\.(?:jpg|png|webp))\?w=\d+/g;
+    // Match individual image URLs (non-greedy: stop before ?, whitespace, or quotes)
+    const re = /https:\/\/isadora-damassets[^?\s"'<>]+/g;
     let m;
-    while ((m = re.exec(html)) !== null) imgSet.add(m[1]);
+    while ((m = re.exec(html)) !== null) {
+      const url = m[0];
+      // Keep only image files, exclude swatch thumbnails
+      if (/\.(?:jpg|png|webp)$/i.test(url) && !/_swatch/i.test(url)) {
+        imgSet.add(url);
+      }
+    }
     return [...imgSet];
   }
 
@@ -1554,7 +1561,7 @@
     }
     images = images.map(u => u.split('?')[0]).filter(u => u);
     if (!images.length) {
-      images = [...new Set([...html.matchAll(/srcset="(https:\/\/isadora-damassets[^"]+\.(?:jpg|png|webp))\?w=\d+/g)].map(m => m[1]))];
+      images = isadoraCarouselImages(html);
     }
 
     // Price
