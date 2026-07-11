@@ -1390,85 +1390,86 @@
     // ── 7. Variant extraction ─────────────────────────────────────────────────
     let variants = [];
 
-    // 7a. Active-tab mode: open the client-rendered dropdown and read all options
+    // 7a. Active-tab mode: open the client-rendered dropdown, collect variants,
+    //     then click each variant to capture its carousel images.
+    //     Swatch images and variant product images are DIFFERENT assets on IsaDora,
+    //     so we must load each variant's page to get its correct product images.
     if (typeof document !== 'undefined' && document.querySelector) {
       try {
         const toggle = document.querySelector('[class*="variant-dropdown_dropdown-toggle"]');
         if (toggle) {
-          // ── Capture currently-selected variant info BEFORE opening dropdown ──
-          // The carousel images on the page belong to the currently selected variant.
-          // Swatch images and variant product images are DIFFERENT assets on IsaDora,
-          // so deriving variant images from swatches (via _swatch stripping) is wrong.
-          // Instead, match the selected variant by name to the carousel images.
-          const selectedName = (toggle.textContent || '').replace(/\s+/g, ' ').trim();
-          // Also try to read selected name from the toggle's label span
-          let selNameFromToggle = '';
-          const labelEl = toggle.querySelector('[class*="typography-label"]');
-          if (labelEl) selNameFromToggle = (labelEl.textContent || '').replace(/\s+/g, ' ').trim();
-          const selMatchName = selNameFromToggle || selectedName;
-
-          // Open the dropdown
+          // ── PHASE 1: Open dropdown, collect all variant names + swatches ──
           toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
           await new Promise(r => setTimeout(r, 600));
 
-          // Collect variant options (try multiple selectors for resilience)
           const seen = new Set();
-          // Strategy A: explicit <button> or <div> options inside the dropdown
           let options = document.querySelectorAll(
             '[role="option"], [role="listbox"] > *, [class*="dropdown-content"] > *, [class*="variant-dropdown"] [class*="option"], [class*="variant-dropdown"] button'
           );
           if (!options.length) {
-            // Strategy B: any element inside the dropdown that looks like a shade item
             const dropdown = document.querySelector('[role="listbox"], [class*="dropdown-content"], [aria-expanded="true"]');
             if (dropdown) options = dropdown.querySelectorAll('button, a, [class*="item"], [class*="option"], [class*="link"]');
           }
-          // Strategy C: brute-force all buttons/links near the toggle
           if (!options.length) {
             options = document.querySelectorAll('button, [role="button"], a[href]');
-            // Only keep those with text that looks like a shade name (contains a number and word)
             options = [...options].filter(o => {
               const t = (o.textContent || '').trim();
               return t && /\d+/.test(t) && !/review|ingredient|share|cart|buy|add|save/i.test(t) && t.length < 50;
             });
           }
 
+          // Build list of { name, swatch } for all variants
+          const variantEntries = [];
           for (const opt of options) {
             const name = (opt.textContent || '').replace(/\s+/g, ' ').trim();
             if (!name || seen.has(name) || name.length < 3 || name.length > 60) continue;
-            // Filter out non-variant text (price-only, action buttons, etc.)
             if (/^(SEK|kr|€|\$)/i.test(name) || /^(buy|add|save|share|review|cart)/i.test(name)) continue;
             seen.add(name);
-
-            // Determine variant images:
-            // - If this variant matches the currently-selected one, use the carousel
-            //   images from the page (they are the correct product images).
-            // - Otherwise leave images empty (swatch-derived URLs are unreliable).
-            let varImages = [];
-            if (name === selMatchName || name.startsWith(selMatchName) || selMatchName.startsWith(name)) {
-              varImages = parentImages.slice(0);
-            }
-
-            // Extract swatch for colorCode
             const img = opt.querySelector('img');
-            const swatchSrc = img
-              ? (img.getAttribute('src') || img.getAttribute('srcset') || '').split(/[? ]/)[0]
-              : '';
-            let bgImg = '';
-            const swatchEl = opt.querySelector('[class*="swatch"]') || opt;
-            const style = swatchEl.getAttribute('style') || '';
-            const bgM = style.match(/url\(["']?([^)"']+)/);
-            if (bgM) bgImg = bgM[1].split('?')[0];
-            const swatch = swatchSrc || bgImg || '';
-
-            variants.push({
-              name, sku: '', regularPrice: '', salePrice: '',
-              images: varImages, extras: [], colorCode: swatch,
-            });
+            const swatchSrc = img ? (img.getAttribute('src') || img.getAttribute('srcset') || '').split(/[? ]/)[0] : '';
+            variantEntries.push({ name, swatch: swatchSrc });
           }
 
-          // Close the dropdown
+          // Close the dropdown after Phase 1
           toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-          await new Promise(r => setTimeout(r, 100));
+          await new Promise(r => setTimeout(r, 300));
+
+          // ── PHASE 2: Click each variant to load its carousel, then scrape ──
+          for (const entry of variantEntries) {
+            let varImages = [];
+            try {
+              const t2 = document.querySelector('[class*="variant-dropdown_dropdown-toggle"]');
+              if (!t2) break;
+              t2.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+              await new Promise(r => setTimeout(r, 400));
+
+              const freshOptions = document.querySelectorAll(
+                '[role="option"], [role="listbox"] > *, [class*="dropdown-content"] > *, [class*="variant-dropdown"] [class*="option"], [class*="variant-dropdown"] button'
+              );
+              for (const fo of freshOptions) {
+                const foName = (fo.textContent || '').replace(/\s+/g, ' ').trim();
+                if (foName === entry.name) {
+                  fo.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                  await new Promise(r => setTimeout(r, 800));
+                  break;
+                }
+              }
+
+              // Scrape carousel images for this variant
+              const imgSet = new Set();
+              const re = /srcset="(https:\/\/isadora-damassets[^"]+\.(?:jpg|png|webp))\?w=\d+/g;
+              let m;
+              while ((m = re.exec(document.documentElement.innerHTML)) !== null) {
+                imgSet.add(m[1]);
+              }
+              varImages = [...imgSet];
+            } catch (e) { /* skip this variant's images on error */ }
+
+            variants.push({
+              name: entry.name, sku: '', regularPrice: '', salePrice: '',
+              images: varImages, extras: [], colorCode: entry.swatch,
+            });
+          }
         }
       } catch (e) { /* DOM interaction failed — fall back below */ }
     }
