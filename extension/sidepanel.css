@@ -194,3 +194,10 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sy
 .cat-del-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--muted); cursor: pointer; font-size: 11px; padding: 4px 10px; border-radius: 4px; line-height: 1; flex-shrink: 0; }
 .cat-del-btn:hover { color: var(--err); border-color: var(--err); background: rgba(248,113,113,.1); }
 .cat-empty { padding: 20px 0; text-align: center; }
+
+/* Categories multi-select in results table */
+.cat-select-cell { min-width: 130px; }
+.cat-multisel { width: 100%; min-height: 32px; background: var(--surface); border: 1px solid var(--border);
+  color: var(--text); border-radius: 4px; padding: 2px 4px; font-size: 11px; }
+.cat-multisel:focus { outline: none; border-color: var(--accent); }
+.cat-multisel option { padding: 2px 4px; }

@@ -55,6 +55,21 @@ function catNextId() {
   return max + 1;
 }
 
+// Flatten nested categories into "Parent > Child" display strings for multi-select
+function flatCategoryOptions() {
+  const flat = [];
+  function walk(parentId, prefix) {
+    const children = catList.filter(c => c.parentId === parentId);
+    for (const c of children) {
+      const label = prefix ? prefix + ' > ' + c.name : c.name;
+      flat.push({ label, value: label });
+      walk(c.id, label);
+    }
+  }
+  walk('', '');
+  return flat;
+}
+
 function renderCategories() {
   loadCategories().then(() => {
     const ul = $('cat-list');
@@ -172,7 +187,7 @@ async function runScrape(req) {
     if (!res || !res.ok) throw new Error((res && res.error) || 'Scrape failed');
     currentRows = res.rows || [];
     const brand = brandFromUrl(req.url || '');
-    currentRows.forEach(r => { r.tags = brand; r['Product URL'] = req.url || ''; });
+    currentRows.forEach(r => { r.tags = brand; r['Product URL'] = req.url || ''; r.Categories = r.Categories || ''; });
     $('status').classList.add('hidden');
     renderResults(res.title || '');
   } catch (e) {
@@ -284,11 +299,38 @@ function renderResults(title) {
         if (cc.startsWith('#')) return `<td><span class="swatch-dot" style="background:${escHtml(cc)}"></span> ${escHtml(cc)}</td>`;
         if (cc.startsWith('http')) return `<td><img src="${escHtml(cc)}" onerror="this.style.display='none'"></td>`;
       }
+      // Categories: multi-select dropdown for parent/simple rows, read-only for variations
+      if (col === 'Categories' && !isVar) {
+        const selected = String(row['Categories'] || '').split(',').map(s => s.trim()).filter(Boolean);
+        const opts = flatCategoryOptions();
+        const optionsHtml = opts.map(o => {
+          const sel = selected.includes(o.value) ? ' selected' : '';
+          return `<option value="${escHtml(o.value)}"${sel}>${escHtml(o.label)}</option>`;
+        }).join('');
+        return `<td class="cat-select-cell"><select multiple class="cat-multisel" data-rowid="${escHtml(String(row.ID))}">${optionsHtml}</select></td>`;
+      }
       const val = cellValue(col, row);
       return `<td title="${escHtml(val)}">${escHtml(val.length > 80 ? val.slice(0, 80) + '…' : val)}</td>`;
     }).join('');
     return `<tr data-rowid="${escHtml(String(row.ID))}"${isVar ? ' class="var-row"' : ''}>${selCell}${cells}</tr>`;
   }).join('');
+
+  // Categories multi-select change handlers
+  $('tbody').querySelectorAll('.cat-multisel').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const rowId = Number(sel.dataset.rowid);
+      const row = currentRows.find(r => Number(r.ID) === rowId);
+      if (!row) return;
+      const vals = [...sel.selectedOptions].map(o => o.value);
+      row['Categories'] = vals.join(', ');
+      // Propagate to child variations
+      for (const r of currentRows) {
+        if (r.Type === 'variation' && r.Parent && String(r.Parent) === 'id:' + rowId) {
+          r['Categories'] = row['Categories'];
+        }
+      }
+    });
+  });
 
   if (showSel) {
     $('master-check').addEventListener('change', e => setAllChecks(e.target.checked));
