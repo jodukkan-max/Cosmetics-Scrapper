@@ -13,6 +13,7 @@
       <button id="tab-products" class="sp-tab active" data-tab="products">Products</button>
       <button id="tab-bulk" class="sp-tab" data-tab="bulk">Bulk <span id="bulk-tab-count" class="bulk-tab-count">(0)</span></button>
       <button id="tab-stores" class="sp-tab" data-tab="stores">Stores</button>
+      <button id="tab-categories" class="sp-tab" data-tab="categories">Categories</button>
     </div>
   </header>
 
@@ -135,6 +136,21 @@
       <div id="store-form-status" class="status hidden"></div>
     </div>
     <ul id="store-list" class="store-list"></ul>
+  </section>
+
+  <!-- Categories panel -->
+  <section id="panel-categories" class="sp-panel hidden">
+    <div class="cat-form">
+      <div class="cat-form-row">
+        <input type="text" id="cat-name-input" placeholder="Category name (e.g. Face)" />
+        <select id="cat-parent-select">
+          <option value="">— Top-level —</option>
+        </select>
+        <button id="cat-add-btn" class="primary-btn">Add</button>
+      </div>
+    </div>
+    <ul id="cat-list" class="cat-list"></ul>
+    <div id="cat-empty" class="cat-empty muted">No categories added yet.</div>
   </section>
 
   <script src="scrapers.js"></script>

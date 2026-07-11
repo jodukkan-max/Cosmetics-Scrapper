@@ -24,16 +24,96 @@ function detectSite(url) {
   return '';
 }
 
-// I── Tabs (Products / Bulk / Stores) I─────────────────────────────────────────
+// I── Tabs (Products / Bulk / Stores / Categories) I───────────────────────────
 document.querySelectorAll('.sp-tab').forEach(btn => btn.addEventListener('click', () => {
   const tab = btn.dataset.tab;
   document.querySelectorAll('.sp-tab').forEach(b => b.classList.toggle('active', b === btn));
   $('panel-products').classList.toggle('hidden', tab !== 'products');
   $('panel-bulk').classList.toggle('hidden', tab !== 'bulk');
   $('panel-stores').classList.toggle('hidden', tab !== 'stores');
+  $('panel-categories').classList.toggle('hidden', tab !== 'categories');
   if (tab === 'stores') renderStores();
   if (tab === 'bulk') refreshBulkUI();
+  if (tab === 'categories') renderCategories();
 }));
+
+// ═══ Category management ══════════════════════════════════════════════════════
+// Persisted as { id, name, parentId } (parentId = '' for top-level)
+let catList = [];
+
+async function loadCategories() {
+  const d = await chrome.storage.local.get('categories');
+  catList = d.categories || [];
+}
+async function saveCategories() {
+  await chrome.storage.local.set({ categories: catList });
+}
+
+function catNextId() {
+  let max = 0;
+  for (const c of catList) if (c.id > max) max = c.id;
+  return max + 1;
+}
+
+function renderCategories() {
+  loadCategories().then(() => {
+    const ul = $('cat-list');
+    const empty = $('cat-empty');
+    const sel = $('cat-parent-select');
+
+    // Build parent select options
+    const topCats = catList.filter(c => !c.parentId);
+    sel.innerHTML = '<option value="">— Top-level —</option>' +
+      topCats.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
+
+    if (!catList.length) {
+      ul.innerHTML = '';
+      ul.classList.add('hidden');
+      empty.classList.remove('hidden');
+      return;
+    }
+    ul.classList.remove('hidden');
+    empty.classList.add('hidden');
+
+    // Render tree: top-level with children indented
+    function renderSub(cats, depth) {
+      return cats.map(c => {
+        const children = catList.filter(ch => ch.parentId === c.id);
+        return `<li class="cat-item" style="padding-left:${8 + depth * 20}px">
+          <span class="cat-name">${escHtml(c.name)}</span>
+          <button class="cat-del-btn" data-id="${c.id}" title="Delete">✕</button>
+          ${children.length ? renderSub(children, depth + 1) : ''}
+        </li>`;
+      }).join('\n');
+    }
+    ul.innerHTML = `<ul class="cat-tree">${renderSub(topCats, 0)}</ul>`;
+
+    // Delete handlers
+    ul.querySelectorAll('.cat-del-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = Number(btn.dataset.id);
+        // Also remove children
+        catList = catList.filter(c => c.id !== id && c.parentId !== id);
+        await saveCategories();
+        renderCategories();
+      });
+    });
+  });
+}
+
+$('cat-add-btn').addEventListener('click', async () => {
+  const name = $('cat-name-input').value.trim();
+  if (!name) return;
+  const parentId = $('cat-parent-select').value ? Number($('cat-parent-select').value) : '';
+  catList.push({ id: catNextId(), name, parentId });
+  await saveCategories();
+  $('cat-name-input').value = '';
+  $('cat-parent-select').value = '';
+  renderCategories();
+});
+
+// Load categories on startup
+loadCategories();
 
 // ═══ Product type ═══════════════════════════════════════════════════════════
 $('type-variable').addEventListener('click', () => setType('variable'));
