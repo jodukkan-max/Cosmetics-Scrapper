@@ -1580,6 +1580,100 @@
     };
   }
 
+  // ── Topface (Shopify; variant JSON inline in script tag) ───────────────────
+  // The page embeds a Shopify product variants array as JSON in a <script> tag
+  // ([{"id":…,"featured_image":{…},"price":350,…},…]). JSON-LD carries name/desc.
+
+  async function scrapeTopface(ctx) {
+    const html = ctx.mainHtml;
+
+    // ── 1. Parse variant JSON from script tag ──────────────────────────────────
+    let variantsData = null;
+    for (const m of html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)) {
+      const s = m[1].trim();
+      if (s.startsWith('[{') && s.includes('"sku"') && s.includes('"featured_image"')) {
+        try { variantsData = JSON.parse(s); break; } catch (e) {}
+      }
+    }
+    if (!variantsData || !Array.isArray(variantsData) || !variantsData.length)
+      throw new Error('No Topface variant data found.');
+
+    // ── 2. Product name from JSON-LD ──────────────────────────────────────────
+    let productName = '', description = '', productImages = [];
+    for (const raw of ldBlocks(html)) {
+      try {
+        const ld = JSON.parse(raw);
+        if (ld['@type'] === 'Product') {
+          productName = ld.name || '';
+          description = (ld.description || '').trim();
+          if (ld.image) {
+            productImages = Array.isArray(ld.image) ? ld.image : [ld.image];
+            productImages = productImages.map(u => typeof u === 'string' ? u.split('?')[0] : '').filter(Boolean);
+          }
+          break;
+        }
+      } catch (e) {}
+    }
+
+    // ── 3. Categories (product type from Shopify meta) ────────────────────────
+    const typeM = html.match(/"type":"([^"]+)"/);
+    const categories = (typeM && typeM[1] && typeM[1] !== 'object') ? typeM[1] : '';
+
+    // ── 4. Short description (empty on Topface PDPs — use meta description) ──
+    const metaDesc = html.match(/<meta[^>]*property="og:description"[^>]*content="([^"]*)"/);
+    let shortDesc = metaDesc ? decodeEntities(metaDesc[1].trim()) : '';
+    // Filter out store name as sole description
+    if (shortDesc && shortDesc === productName || shortDesc.length < 10) shortDesc = '';
+
+    // ── 5. Build variant rows ────────────────────────────────────────────────
+    const variants = variantsData.map(v => {
+      const fi = v.featured_image;
+      const img = fi ? (fi.src || '').split('?')[0] : '';
+      const absImg = img.startsWith('//') ? 'https:' + img : img;
+      // Price is in cents → convert to decimal
+      const price = v.price ? String(v.price / 100) : '';
+      // compare_at_price → sale if higher than price (otherwise no sale)
+      const compareAt = v.compare_at_price ? String(v.compare_at_price / 100) : '';
+      const salePrice = (compareAt && compareAt !== price) ? price : '';
+      const regularPrice = (compareAt && compareAt !== price) ? compareAt : price;
+      // Variant name: strip trailing SKU (e.g. "Cherry Jam - PT215.001" → "Cherry Jam")
+      const name = (v.option1 || v.public_title || '').replace(/\s*-\s*[A-Z]{2,}\d+.*$/, '').trim();
+      return {
+        name, sku: v.sku || '',
+        regularPrice, salePrice,
+        images: absImg ? [absImg] : [],
+        extras: [], colorCode: absImg,
+      };
+    });
+
+    // ── 6. Parent images (fall back to first variant image if no JSON-LD image) ──
+    const parentImages = productImages.length ? productImages : (variants[0] && variants[0].images || []);
+
+    return {
+      rows: variableRows(productName, parentImages, description, shortDesc, categories, 'Image', variants),
+      title: productName,
+    };
+  }
+
+  async function scrapeTopfaceSimple(ctx) {
+    // Reuse variable scraper logic, then wrap in simple row
+    const result = await scrapeTopface(ctx);
+    const firstVariant = result.rows.find(r => r.Type === 'variation') || result.rows[0] || {};
+    const parent = result.rows.find(r => r.Type === 'variable') || result.rows[0] || {};
+    return {
+      rows: simpleRow({
+        sku: firstVariant.SKU || parent.SKU || '',
+        name: result.title || parent.Name || '',
+        description: parent.Description || '',
+        shortDesc: parent['Short Description'] || '',
+        categories: parent.Categories || '',
+        images: firstVariant.Images || parent.Images || [],
+        regularPrice: firstVariant['Regular Price'] || parent['Regular Price'] || '15',
+      }),
+      title: result.title,
+    };
+  }
+
   // ── L'Oréal Paris (Sitecore, color = sibling pages) ─────────────────────────
   function lorealParsePage(html) {
     let product = null, breadcrumb = null;
@@ -2229,6 +2323,7 @@
     maybelline: { variable: scrapeMaybelline, simple: scrapeMaybelline },
     seventeen: { variable: scrapeSeventeen, simple: scrapeSeventeenSimple },
     isadora: { variable: scrapeIsadora, simple: scrapeIsadoraSimple },
+    topface: { variable: scrapeTopface, simple: scrapeTopfaceSimple },
     lorealparis: { variable: scrapeLorealParis, simple: scrapeLorealParisSimple },
     vichy: { variable: scrapeVichy, simple: scrapeVichy },
     larocheposay: { variable: scrapeLarocheposay, simple: scrapeLarocheposay },
@@ -2258,6 +2353,7 @@
         'narscosmetics.com': 'nars', 'glowrecipe.com': 'glowrecipe',         'seventeencosmetics.com': 'seventeen',
         'inglotcosmetics.com': 'inglot', 'radiant-professional.com': 'radiant', 'misslyn.com': 'misslyn',
         'isadora.com': 'isadora',
+        'topfaceofficial.com': 'topface',
         'essencemakeup.com': 'essence', 'charlottetilbury.com': 'charlottetilbury', 'dior.com': 'dior',
         'summerfridays.com': 'summerfridays', 'charactercosmetics.in': 'character',
       };
@@ -2303,6 +2399,7 @@
     { name: 'Summer Fridays', domain: 'summerfridays.com', key: 'summerfridays' },
     { name: 'Character Cosmetics', domain: 'charactercosmetics.in', key: 'character', example: 'https://charactercosmetics.in/products/character-hyaluronic-acid-high-coverage-foundation' },
     { name: 'IsaDora', domain: 'isadora.com', key: 'isadora', example: 'https://www.isadora.com/products/face/powder/the-no-compromise-matte-longwear-powder/60-neutral-porcelain' },
+    { name: 'Topface', domain: 'topfaceofficial.com', key: 'topface', example: 'https://topfaceofficial.com/products/aqua-tint-lip-cheek' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key] }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
