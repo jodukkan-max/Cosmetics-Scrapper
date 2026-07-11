@@ -1694,21 +1694,82 @@
   }
 
   async function scrapeTopfaceSimple(ctx) {
-    // Reuse variable scraper logic, then wrap in simple row
-    const result = await scrapeTopface(ctx);
-    const firstVariant = result.rows.find(r => r.Type === 'variation') || result.rows[0] || {};
-    const parent = result.rows.find(r => r.Type === 'variable') || result.rows[0] || {};
+    const html = ctx.mainHtml;
+
+    // ── 1. Parse GloboSwatchConfig.product JSON ────────────────────────────────
+    let product = null;
+    const gscM = html.match(/product:\s*(\{"id":\d+)/);
+    if (gscM) {
+      const i = html.indexOf(gscM[1], gscM.index);
+      let brace = 0, end = i;
+      for (let j = i; j < html.length; j++) {
+        if (html[j] === '{') brace++;
+        else if (html[j] === '}') { brace--; if (brace === 0) { end = j + 1; break; } }
+      }
+      try { product = JSON.parse(html.slice(i, end)); } catch (e) {}
+    }
+    if (!product) throw new Error('No Topface product data found.');
+
+    const productName = product.title || '';
+    const categories = (product.type && product.type !== 'object') ? product.type : '';
+
+    // ── 2. Images (product.media or product.images) ────────────────────────────
+    const images = [];
+    const mediaSources = product.media || product.images || [];
+    for (const m of mediaSources) {
+      let src = typeof m === 'string' ? m : (m && m.src) || '';
+      if (!src) continue;
+      if (src.startsWith('//')) src = 'https:' + src;
+      images.push(src.split('?')[0]);
+    }
+    // Fallback: JSON-LD image
+    if (!images.length) {
+      for (const raw of ldBlocks(html)) {
+        try {
+          const ld = JSON.parse(raw);
+          if (ld['@type'] === 'Product' && ld.image) {
+            const imgs = Array.isArray(ld.image) ? ld.image : [ld.image];
+            images.push(...imgs.map(u => (typeof u === 'string' ? u : '').split('?')[0]).filter(Boolean));
+            break;
+          }
+        } catch (e) {}
+      }
+    }
+
+    // ── 3. SKU & Price ────────────────────────────────────────────────────────
+    let sku = '', regularPrice = '';
+    const variant = (product.variants && product.variants[0]) || {};
+
+    // Prefer variant JSON (cents → decimal) over JSON-LD
+    sku = variant.sku || '';
+    regularPrice = variant.price ? String(variant.price / 100) : '';
+
+    // Fallback to JSON-LD
+    if (!sku || !regularPrice) {
+      for (const raw of ldBlocks(html)) {
+        try {
+          const ld = JSON.parse(raw);
+          if (ld['@type'] === 'Product') {
+            if (!sku) sku = ld.sku || ld.gtin13 || '';
+            if (!regularPrice) {
+              const offers = ld.offers;
+              if (Array.isArray(offers) && offers[0]) regularPrice = String(offers[0].price || '');
+              else if (offers && offers.price) regularPrice = String(offers.price);
+            }
+            break;
+          }
+        } catch (e) {}
+      }
+    }
+
+    // ── 4. Short description ──────────────────────────────────────────────────
+    const metaDesc = html.match(/<meta[^>]*property="og:description"[^>]*content="([^"]*)"/);
+    let shortDesc = metaDesc ? decodeEntities(metaDesc[1].trim()) : '';
+    if (shortDesc === productName || shortDesc.length < 10) shortDesc = '';
+
     return {
-      rows: simpleRow({
-        sku: firstVariant.SKU || parent.SKU || '',
-        name: result.title || parent.Name || '',
-        description: parent.Description || '',
-        shortDesc: parent['Short Description'] || '',
-        categories: parent.Categories || '',
-        images: firstVariant.Images || parent.Images || [],
-        regularPrice: firstVariant['Regular Price'] || parent['Regular Price'] || '15',
-      }),
-      title: result.title,
+      rows: simpleRow({ sku, name: productName, description: '', shortDesc, categories, images, regularPrice }),
+      title: productName,
     };
   }
 
