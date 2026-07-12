@@ -241,8 +241,9 @@ class Rsi_Product_Creator {
                     $var_body['sale_price'] = (string) $sale_price;
                 }
 
-                $var_images = $var['images'] ?? [];
-                if (!empty($var_images[0])) {
+                $var_images       = $var['images'] ?? [];
+                $parent_first_img = $parent['images'][0] ?? '';
+                if (!empty($var_images[0]) && $var_images[0] !== $parent_first_img) {
                     $var_body['image'] = ['src' => $var_images[0]];
                 }
 

@@ -81,8 +81,9 @@ class Rsi_Image_Compressor {
                 return false;
         }
 
-        if ($img) {
-            imagedestroy($img);
+        // imagedestroy() is a no-op since PHP 8.0 — suppress the deprecation.
+        if ($img && PHP_VERSION_ID < 80000) {
+            @imagedestroy($img);
         }
 
         // Clear the file stat cache so subsequent filesize() calls reflect the
