@@ -3735,6 +3735,98 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Diego Dalla Palma (Shopify — var meta + swatchImageUrl swatches) ──────
+  async function scrapeDiegodallapalma(ctx) {
+    const html = ctx.mainHtml;
+
+    // 1. Parse var meta for variant data
+    const metaMatch = html.match(/var\s+meta\s*=\s*(\{[\s\S]*?\});\s*\n/);
+    if (!metaMatch) throw new Error('var meta not found');
+    const meta = JSON.parse(metaMatch[1]);
+    const product = meta.product;
+    if (!product || !product.variants) throw new Error('Product variants not found in var meta');
+
+    // 2. Title: from <title> tag or og:title, taking part before '|'
+    let title = '';
+    const titleMatch = html.match(/<title>([^<]+)<\/title>/i)
+      || html.match(/property="og:title"\s+content="([^"]+)"/);
+    if (titleMatch) {
+      title = titleMatch[1].split('|')[0].trim();
+    }
+    if (!title) title = decodeEntities(product.vendor || '');
+
+    // 3. Attribute name — "Color" (Diego Dalla Palma uses "Colore" for color options)
+    const optionName = 'Color';
+
+    // 4. Extract swatch images and map to variants by numeric prefix
+    const swatchMap = {};
+    const swatchRe = /swatchImageUrl\s*:\s*"([^"]+)"/g;
+    let sm;
+    while ((sm = swatchRe.exec(html))) {
+      const url = sm[1];
+      // Match numeric prefix in filename: e.g. "11-cappuccino" → "11"
+      const numMatch = url.match(/\/(\d+)-/);
+      if (numMatch) {
+        swatchMap[numMatch[1]] = url;
+      }
+    }
+
+    // 5. Main product image from og:image
+    let mainImage = '';
+    const ogImgMatch = html.match(/property="og:image"\s+content="([^"]+)"/);
+    if (ogImgMatch) {
+      mainImage = ogImgMatch[1].replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, '');
+    }
+
+    // 6. Description from meta description
+    let description = '';
+    const descMatch = html.match(/name="description"\s+content="([^"]+)"/);
+    if (descMatch) description = decodeEntities(descMatch[1]);
+
+    // 7. Categories from BreadcrumbList JSON-LD
+    let categories = '';
+    try {
+      const bcRe = /<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi;
+      let bcMatch;
+      while ((bcMatch = bcRe.exec(html))) {
+        const bcText = bcMatch[1];
+        if (!bcText.includes('BreadcrumbList')) continue;
+        const bcJson = JSON.parse(bcText);
+        if (bcJson['@type'] === 'BreadcrumbList' && bcJson.itemListElement) {
+          categories = bcJson.itemListElement
+            .map(i => i.name || (i.item && i.item.name) || '')
+            .filter(c => c && !/^home$/i.test(c))
+            .join(' > ');
+          break;
+        }
+      }
+    } catch (e) {}
+
+    // 8. Build variant objects
+    const convertPrice = (cents) => {
+      const num = parseFloat(cents);
+      return isNaN(num) ? '' : (num / 100).toFixed(2);
+    };
+
+    const variants = product.variants.map(v => {
+      const publicTitle = v.public_title || '';
+      // Match variant by numeric prefix: "11. cappuccino" → "11"
+      const numMatch = publicTitle.match(/^(\d+)/);
+      const swatchUrl = numMatch ? (swatchMap[numMatch[1]] || '') : '';
+      return {
+        name: publicTitle,
+        sku: v.sku || '',
+        regularPrice: convertPrice(v.price),
+        salePrice: '',
+        images: mainImage ? [mainImage] : [],
+        extras: [],
+        colorCode: swatchUrl,
+      };
+    });
+
+    return { rows: variableRows(title, mainImage ? [mainImage] : [], description, '', categories, optionName, variants), title };
+  }
+
   // ── Dispatch ─────────────────────────────────────────────────────────────
   const SCRAPERS = {
     nyx: { variable: scrapeNyx, simple: scrapeNyxSimple },
@@ -3774,6 +3866,7 @@
     sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
     macadamiahair: { variable: scrapeMacadamiahairSimple, simple: scrapeMacadamiahairSimple },
     acm: { variable: scrapeAcmSimple, simple: scrapeAcmSimple },
+    diegodallapalma: { variable: scrapeDiegodallapalma, simple: scrapeDiegodallapalma },
     eucerin: { variable: scrapeEucerinSimple, simple: scrapeEucerinSimple },
     isdin: { variable: scrapeIsdinSimple, simple: scrapeIsdinSimple },
     bioderma: { variable: scrapeBiodermaSimple, simple: scrapeBiodermaSimple },
@@ -3810,6 +3903,7 @@
         'babaria.es': 'babaria',
         'sarahk.com.br': 'sarahk',
         'sheamiracles.com': 'sheamiracles',
+        'diegodallapalma.com': 'diegodallapalma',
         'eucerin-me.com': 'eucerin',
         'isdin.com': 'isdin',
         'bioderma.ae': 'bioderma',
@@ -3875,6 +3969,7 @@
     { name: 'Babaria', domain: 'babaria.es', key: 'babaria', example: 'https://babaria.es/en/producto/face-serum-collagen/' },
     { name: 'Sarah K', domain: 'sarahk.com.br', key: 'sarahk', example: 'https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2' },
     { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
+    { name: 'Diego dalla Palma', domain: 'diegodallapalma.com', key: 'diegodallapalma', example: 'https://diegodallapalma.com/en/products/matita-sopracciglia-alta-precisione-resistente-all-acqua-lunga-tenuta-df12001-master' },
     { name: 'Eucerin', domain: 'eucerin-me.com', key: 'eucerin', example: 'https://www.en.eucerin-me.com/products/dermopure-clinical/scrub' },
     { name: 'ISDIN', domain: 'isdin.com', key: 'isdin', example: 'https://www.isdin.com/en-AE/product/isdinceutics/age-reverse-night' },
     { name: 'Bioderma', domain: 'bioderma.ae', key: 'bioderma', example: 'https://www.bioderma.ae/our-products/atoderm/creme' },
