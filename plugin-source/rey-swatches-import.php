@@ -5,7 +5,7 @@
  * Description:  Receives CSV data from the Cosmetics Scraper Chrome extension and
  *               imports WooCommerce variable products with full Rey theme swatch
  *               support (color swatches, image swatches, extra variation images).
- * Version:      1.6.1
+ * Version:      1.6.2
  * Author:       Cosmetics Scraper Team
  * License:      GPL-2.0+
  * Requires PHP: 7.4
