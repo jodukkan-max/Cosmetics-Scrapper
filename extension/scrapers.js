@@ -3045,6 +3045,52 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Uriage (Drupal custom — HTML microdata + gallery) ──────────────────────
+  async function scrapeUriageSimple(ctx) {
+    const html = ctx.mainHtml;
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+
+    // Title: h1.c-product__title
+    const h1El = doc.querySelector('h1.c-product__title');
+    const title = h1El ? h1El.textContent.trim() : '';
+
+    // Description: .c-product__intro
+    const introEl = doc.querySelector('.c-product__intro');
+    const description = introEl ? introEl.textContent.replace(/\s+/g, ' ').trim() : '';
+
+    // SKU: not available
+    const sku = '';
+
+    // Price: not available (catalog page)
+    const price = '';
+
+    // Categories: from breadcrumb links (skip Home, skip product name)
+    let categories = '';
+    const breadcrumbLinks = doc.querySelectorAll('.c-breadcrumb .c-breadcrumb__item--link');
+    const crumbs = [...breadcrumbLinks]
+      .map(a => a.textContent.trim())
+      .filter(t => t && t !== 'Home');
+    // Last breadcrumb span (not a link) is the product name — already captured as title
+    categories = crumbs.join(' > ');
+
+    // Images: from gallery img elements
+    let images = [];
+    const galleryImgs = doc.querySelectorAll('.c-gallery .c-gallery__img');
+    for (const img of galleryImgs) {
+      const src = img.getAttribute('src');
+      if (!src) continue;
+      // Resolve relative URLs
+      let resolved = src;
+      if (!/^https?:/.test(resolved)) {
+        try { resolved = new URL(src, ctx.url).href; } catch (e) {}
+      }
+      images.push(resolved);
+    }
+    images = [...new Set(images)].slice(0, 4);
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Filorga (Shopify — ld+json Product, offers as array) ───────────────────
   async function scrapeFilorgaSimple(ctx) {
     const html = ctx.mainHtml;
@@ -3368,6 +3414,7 @@
     sarahk: { variable: scrapeSarakhSimple, simple: scrapeSarakhSimple },
     sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
     macadamiahair: { variable: scrapeMacadamiahairSimple, simple: scrapeMacadamiahairSimple },
+    uriage: { variable: scrapeUriageSimple, simple: scrapeUriageSimple },
     sebamed: { variable: scrapeSebamedSimple, simple: scrapeSebamedSimple },
     filorga: { variable: scrapeFilorgaSimple, simple: scrapeFilorgaSimple },
     creme21: { variable: scrapeCreme21Simple, simple: scrapeCreme21Simple },
@@ -3398,6 +3445,7 @@
         'babaria.es': 'babaria',
         'sarahk.com.br': 'sarahk',
         'sheamiracles.com': 'sheamiracles',
+        'uriage.com': 'uriage',
         'filorga.com': 'filorga',
         'sebamed.com': 'sebamed',
         'al-dawaa.com': 'creme21',
@@ -3456,6 +3504,7 @@
     { name: 'Babaria', domain: 'babaria.es', key: 'babaria', example: 'https://babaria.es/en/producto/face-serum-collagen/' },
     { name: 'Sarah K', domain: 'sarahk.com.br', key: 'sarahk', example: 'https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2' },
     { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
+    { name: 'Uriage Eau Thermale', domain: 'uriage.com', key: 'uriage', example: 'https://www.uriage.com/MT/en/products/unctuous-body-balm' },
     { name: 'Filorga Laboratoires Paris', domain: 'filorga.com', key: 'filorga', example: 'https://int.filorga.com/products/ncef-revitalize-creme' },
     { name: 'Seba Med', domain: 'sebamed.com', key: 'sebamed', example: 'https://sebamed.com/en/p/antibacterial-cleansing-foam/' },
     { name: 'Creme 21', domain: 'al-dawaa.com', key: 'creme21', example: 'https://www.al-dawaa.com/en/p/209943/creame-21-body-lotion-ultra-dry-skin-almond-oil-600-ml' },
