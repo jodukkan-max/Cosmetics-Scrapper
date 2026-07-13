@@ -3045,6 +3045,82 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Seba Med (sebamed.com Shopware — ld+json Product) ───────────────────────
+  async function scrapeSebamedSimple(ctx) {
+    const html = ctx.mainHtml;
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+
+    // Product JSON-LD
+    let title = '', description = '', sku = '', price = '', categories = '';
+    let images = [];
+    const ldScripts = [...doc.querySelectorAll('script[type="application/ld+json"]')];
+    let productObj = null;
+    let breadcrumbObj = null;
+    for (const s of ldScripts) {
+      try {
+        const obj = JSON.parse(s.textContent);
+        if (obj['@type'] === 'Product') productObj = obj;
+        if (obj['@type'] === 'BreadcrumbList') breadcrumbObj = obj;
+      } catch (e) { /* ignore */ }
+    }
+
+    if (productObj) {
+      title = productObj.name || '';
+      description = (productObj.description || '').replace(/;/g, ' ').replace(/\s+/g, ' ').trim();
+      sku = productObj.sku || productObj.gtin13 || '';
+      if (!sku) sku = (productObj.gtin13) || '';
+      // Price: in offers object
+      const offers = productObj.offers;
+      if (offers) {
+        const p = typeof offers.price !== 'undefined' ? String(offers.price) : '';
+        if (p && p !== '0.00') price = p;
+      }
+      // Images: from image array of ImageObject
+      if (Array.isArray(productObj.image)) {
+        images = productObj.image.map(img => img.contentUrl || img).filter(Boolean);
+      } else if (productObj.image && typeof productObj.image === 'string') {
+        images = [productObj.image];
+      }
+      // Category from JSON-LD category field
+      if (productObj.category) {
+        categories = productObj.category;
+      }
+    }
+
+    // Fallback title: from h1
+    if (!title) {
+      const h1Match = html.match(/<h1\b[^>]*class="[^"]*product-name__title[^"]*"[^>]*>([\s\S]*?)<\/h1>/i);
+      if (h1Match) title = h1Match[1].trim();
+    }
+
+    // Categories: prefer BreadcrumbList JSON-LD for more detail
+    if (breadcrumbObj && breadcrumbObj.itemListElement) {
+      const items = breadcrumbObj.itemListElement
+        .filter(e => {
+          const item = e.item || e;
+          const name = (item.name || '').toLowerCase();
+          return name && !/^home$/i.test(name) && !/^startpage$/i.test(name) && name !== title.toLowerCase();
+        })
+        .map(e => (e.item ? e.item.name : e.name) || '');
+      if (items.length) categories = items.join(' > ');
+    }
+
+    // Fallback description from og:description
+    if (!description) {
+      const ogD = (html.match(/<meta[^>]*property="og:description"[^>]*content="([^"]+)"/) || [])[1] || '';
+      description = decodeEntities(ogD.trim());
+    }
+
+    // Fallback SKU from product detail data attribute
+    if (!sku) {
+      sku = (html.match(/data-product-sku="([^"]+)"/) || [])[1] || '';
+    }
+
+    images = [...new Set(images)].slice(0, 4);
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Creme 21 (al-dawaa.com Spartacus — ld+json Product + BreadcrumbList) ───
   async function scrapeCreme21Simple(ctx) {
     const html = ctx.mainHtml;
@@ -3236,6 +3312,7 @@
     sarahk: { variable: scrapeSarakhSimple, simple: scrapeSarakhSimple },
     sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
     macadamiahair: { variable: scrapeMacadamiahairSimple, simple: scrapeMacadamiahairSimple },
+    sebamed: { variable: scrapeSebamedSimple, simple: scrapeSebamedSimple },
     creme21: { variable: scrapeCreme21Simple, simple: scrapeCreme21Simple },
     cantubeauty: { variable: scrapeCantubeautySimple, simple: scrapeCantubeautySimple },
   };
@@ -3264,6 +3341,7 @@
         'babaria.es': 'babaria',
         'sarahk.com.br': 'sarahk',
         'sheamiracles.com': 'sheamiracles',
+        'sebamed.com': 'sebamed',
         'al-dawaa.com': 'creme21',
         'macadamiahair.com': 'macadamiahair',
         'cantubeauty.com': 'cantubeauty',
@@ -3320,6 +3398,7 @@
     { name: 'Babaria', domain: 'babaria.es', key: 'babaria', example: 'https://babaria.es/en/producto/face-serum-collagen/' },
     { name: 'Sarah K', domain: 'sarahk.com.br', key: 'sarahk', example: 'https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2' },
     { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
+    { name: 'Seba Med', domain: 'sebamed.com', key: 'sebamed', example: 'https://sebamed.com/en/p/antibacterial-cleansing-foam/' },
     { name: 'Creme 21', domain: 'al-dawaa.com', key: 'creme21', example: 'https://www.al-dawaa.com/en/p/209943/creame-21-body-lotion-ultra-dry-skin-almond-oil-600-ml' },
     { name: 'Macadamia Hair', domain: 'macadamiahair.com', key: 'macadamiahair', example: 'https://www.macadamiahair.com/products/healing-oil-spray' },
     { name: 'Cantu Shea Beauty', domain: 'cantubeauty.com', key: 'cantubeauty', example: 'https://www.cantubeauty.com/products/curls-coils-waves/coconut-curling-cream/' },
