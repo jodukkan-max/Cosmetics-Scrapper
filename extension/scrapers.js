@@ -112,7 +112,7 @@
   function simpleRow(o) {
     return [{
       SKU: o.sku || '', Name: o.name || '', Description: o.description || '', 'Short Description': o.shortDesc || '',
-      'Regular Price': '15', Categories: o.categories || '', Images: o.images || [], 'Sale Price': '',
+      'Regular Price': o.price || '15', Categories: o.categories || '', Images: o.images || [], 'Sale Price': '',
     }];
   }
 
@@ -2614,6 +2614,53 @@
     return await fn(ctx);
   }
 
+  // ── Clamanti (Magento 2 — ld+json + fotorama gallery) ──────────────────────
+  async function scrapeClamantiSimple(ctx) {
+    const html = ctx.mainHtml;
+    const blocks = ldBlocks(html);
+
+    // Product data — extract from the Product ld+json block via regex
+    // (JSON.parse may fail if description contains unescaped control chars)
+    const productBlock = blocks.find(b => b.includes('"@type"') && b.includes('Product')) || '';
+    const title = decodeEntities(((productBlock.match(/"name"\s*:\s*"([^"]+)"/) || [])[1] || ''));
+    const sku = (productBlock.match(/"sku"\s*:\s*"([^"]*)"/) || [])[1] || '';
+    const descM = productBlock.match(/"description"\s*:\s*"([\s\S]*?)(?:"\s*[,}]|"$)/);
+    const description = descM
+      ? decodeEntities(descM[1].replace(/\s+/g, ' ').replace(/<[^>]+>/g, ' ').trim())
+      : '';
+    const priceM = productBlock.match(/"price"\s*:\s*"([0-9.]+)"/);
+    const price = priceM ? priceM[1] : '';
+
+    // Images: extract from fotorama stage frame href attributes (full-size)
+    let images = [];
+    const fotoramaStart = html.indexOf('fotorama__stage__frame');
+    if (fotoramaStart !== -1) {
+      const fotoramaEnd = html.indexOf('fotorama__arr', fotoramaStart);
+      const frameBlock = html.slice(fotoramaStart, fotoramaEnd > fotoramaStart ? fotoramaEnd : fotoramaStart + 20000);
+      images = [...frameBlock.matchAll(/href="(https?:\/\/[^"]+?\.(?:jpg|jpeg|png|webp))/gi)].map(m => m[1]);
+    }
+    // Fallback: use og:image
+    if (!images.length) {
+      const ogImg = (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1];
+      if (ogImg) images = [ogImg];
+    }
+    images = [...new Set(images)];
+
+    // Categories: from BreadcrumbList ld+json
+    let categories = '';
+    const bcBlock = blocks.find(b => b.includes('BreadcrumbList')) || '';
+    if (bcBlock) {
+      try {
+        // Strip unescaped control chars that break JSON.parse
+        const clean = bcBlock.replace(/[\x00-\x1f\x7f]/g, ' ');
+        const bc = JSON.parse(clean);
+        categories = (bc.itemListElement || []).map(i => i.name || (i.item && i.item.name)).filter(c => c && !/^home$/i.test(c) && c.toLowerCase() !== title.toLowerCase()).join('>');
+      } catch (e) {}
+    }
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Dispatch ─────────────────────────────────────────────────────────────
   const SCRAPERS = {
     nyx: { variable: scrapeNyx, simple: scrapeNyxSimple },
@@ -2643,6 +2690,7 @@
     summerfridays: { variable: scrapeSummerfridays, simple: scrapeSummerfridaysSimple },
     character: { variable: scrapeCharacter, simple: scrapeCharacterSimple },
     makeover: { variable: scrapeMakeover, simple: scrapeMakeoverSimple },
+    clamanti: { variable: scrapeClamantiSimple, simple: scrapeClamantiSimple },
   };
 
   // Detect site from a URL hostname.
@@ -2661,6 +2709,7 @@
         'essencemakeup.com': 'essence', 'charlottetilbury.com': 'charlottetilbury', 'dior.com': 'dior',
         'summerfridays.com': 'summerfridays', 'charactercosmetics.in': 'character',
         'makeoverparis.com': 'makeover',
+        'clamanti.co.uk': 'clamanti',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -2706,6 +2755,7 @@
     { name: 'IsaDora', domain: 'isadora.com', key: 'isadora', example: 'https://www.isadora.com/products/face/powder/the-no-compromise-matte-longwear-powder/60-neutral-porcelain' },
     { name: 'Topface', domain: 'topfaceofficial.com', key: 'topface', example: 'https://topfaceofficial.com/products/aqua-tint-lip-cheek' },
     { name: 'MakeOver', domain: 'makeoverparis.com', key: 'makeover', example: 'http://makeoverparis.com/en/products.asp?id1=1&id2=8&id3=32' },
+    { name: 'Clamanti', domain: 'clamanti.co.uk', key: 'clamanti', example: 'https://clamanti.co.uk/bielenda-neuro-retinol-advanced-moisturizing-face-serum-30-ml.html' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key] }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
