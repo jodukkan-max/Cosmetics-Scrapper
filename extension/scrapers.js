@@ -3045,6 +3045,62 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Filorga (Shopify — ld+json Product, offers as array) ───────────────────
+  async function scrapeFilorgaSimple(ctx) {
+    const html = ctx.mainHtml;
+    const blocks = ldBlocks(html);
+
+    let product = null;
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { product = j; break; }
+      } catch (e) {}
+    }
+
+    const title = decodeEntities((product && product.name) || '');
+
+    // SKU & Price: offers is an array in this store
+    let sku = '', price = '';
+    if (product && product.offers) {
+      const offersArray = Array.isArray(product.offers) ? product.offers : [product.offers];
+      const first = offersArray[0] || {};
+      sku = first.sku || product.sku || '';
+      if (typeof first.price !== 'undefined') price = String(first.price);
+    }
+
+    // Fallback price from og:price:amount
+    if (!price) {
+      const ogPrice = (html.match(/<meta[^>]*property="og:price:amount"[^>]*content="([^"]+)"/) || [])[1] || '';
+      if (ogPrice) price = ogPrice.replace(',', '.');
+    }
+
+    // Description from product JSON-LD
+    const description = decodeEntities((product && product.description || '').trim());
+
+    // Images from product.image array (strip Shopify params)
+    let images = [];
+    if (product && product.image) {
+      if (Array.isArray(product.image)) {
+        images = product.image.map(u => u.replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, ''));
+      } else {
+        images = [String(product.image).replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, '')];
+      }
+    }
+    // Fallback: og:image
+    if (!images.length) {
+      const ogImg = (html.match(/property="og:image:secure_url"\s+content="([^"]+)"/) || [])[1]
+        || (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1];
+      if (ogImg) images = [ogImg.replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, '')];
+    }
+    images = [...new Set(images)].slice(0, 4);
+
+    // Categories: not available in JSON-LD or breadcrumb (only Home / Product)
+    const categories = '';
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Seba Med (sebamed.com Shopware — ld+json Product) ───────────────────────
   async function scrapeSebamedSimple(ctx) {
     const html = ctx.mainHtml;
@@ -3313,6 +3369,7 @@
     sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
     macadamiahair: { variable: scrapeMacadamiahairSimple, simple: scrapeMacadamiahairSimple },
     sebamed: { variable: scrapeSebamedSimple, simple: scrapeSebamedSimple },
+    filorga: { variable: scrapeFilorgaSimple, simple: scrapeFilorgaSimple },
     creme21: { variable: scrapeCreme21Simple, simple: scrapeCreme21Simple },
     cantubeauty: { variable: scrapeCantubeautySimple, simple: scrapeCantubeautySimple },
   };
@@ -3341,6 +3398,7 @@
         'babaria.es': 'babaria',
         'sarahk.com.br': 'sarahk',
         'sheamiracles.com': 'sheamiracles',
+        'filorga.com': 'filorga',
         'sebamed.com': 'sebamed',
         'al-dawaa.com': 'creme21',
         'macadamiahair.com': 'macadamiahair',
@@ -3398,6 +3456,7 @@
     { name: 'Babaria', domain: 'babaria.es', key: 'babaria', example: 'https://babaria.es/en/producto/face-serum-collagen/' },
     { name: 'Sarah K', domain: 'sarahk.com.br', key: 'sarahk', example: 'https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2' },
     { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
+    { name: 'Filorga Laboratoires Paris', domain: 'filorga.com', key: 'filorga', example: 'https://int.filorga.com/products/ncef-revitalize-creme' },
     { name: 'Seba Med', domain: 'sebamed.com', key: 'sebamed', example: 'https://sebamed.com/en/p/antibacterial-cleansing-foam/' },
     { name: 'Creme 21', domain: 'al-dawaa.com', key: 'creme21', example: 'https://www.al-dawaa.com/en/p/209943/creame-21-body-lotion-ultra-dry-skin-almond-oil-600-ml' },
     { name: 'Macadamia Hair', domain: 'macadamiahair.com', key: 'macadamiahair', example: 'https://www.macadamiahair.com/products/healing-oil-spray' },
