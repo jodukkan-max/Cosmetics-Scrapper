@@ -3045,6 +3045,63 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Creme 21 (al-dawaa.com Spartacus — ld+json Product + BreadcrumbList) ───
+  async function scrapeCreme21Simple(ctx) {
+    const html = ctx.mainHtml;
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+
+    // Extract Product JSON-LD
+    let name = '', image = '', price = '', brandName = '', description = '';
+    const productScript = doc.querySelector('script[id*="ld-json-product"]');
+    if (productScript) {
+      try {
+        const productData = JSON.parse(productScript.textContent);
+        name = productData.name || '';
+        image = productData.image || '';
+        const offers = productData.offers;
+        if (offers && typeof offers.price !== 'undefined') price = String(offers.price);
+        if (productData.brand && productData.brand.name) brandName = productData.brand.name;
+        description = productData.description || '';
+      } catch (e) { /* ignore parse errors */ }
+    }
+
+    // Fallback for description: og:description
+    if (!description) {
+      const ogDesc = (html.match(/<meta[^>]*property="og:description"[^>]*content="([^"]+)"/) || [])[1] || '';
+      description = decodeEntities(ogDesc);
+    }
+    if (description === '""') description = '';
+
+    // SKU: from URL product code (e.g. /p/209943/...)
+    let sku = '';
+    const skuMatch = html.match(/\/p\/(\d+)\//);
+    if (skuMatch) sku = skuMatch[1];
+
+    // Categories: from BreadcrumbList JSON-LD (skip "Home")
+    let categories = '';
+    const breadcrumbScript = doc.querySelector('script[id*="ld-json-breadcrumb"]');
+    if (breadcrumbScript) {
+      try {
+        const bc = JSON.parse(breadcrumbScript.textContent);
+        categories = (bc.itemListElement || [])
+          .filter(e => e.name && !/^home$/i.test(e.name))
+          .map(e => e.name)
+          .join(' > ');
+      } catch (e) { /* ignore */ }
+    }
+
+    // Images
+    let images = [];
+    if (image) images.push(image);
+    const ogImg = (html.match(/<meta[^>]*name="og:image"[^>]*content="([^"]+)"/) || [])[1];
+    if (ogImg && !images.includes(ogImg)) images.push(ogImg);
+    images = [...new Set(images)].slice(0, 4);
+
+    const title = name;
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Cantu Shea Beauty (custom WP — itemprop + owl carousel) ────────────────
   async function scrapeCantubeautySimple(ctx) {
     const html = ctx.mainHtml;
@@ -3179,6 +3236,7 @@
     sarahk: { variable: scrapeSarakhSimple, simple: scrapeSarakhSimple },
     sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
     macadamiahair: { variable: scrapeMacadamiahairSimple, simple: scrapeMacadamiahairSimple },
+    creme21: { variable: scrapeCreme21Simple, simple: scrapeCreme21Simple },
     cantubeauty: { variable: scrapeCantubeautySimple, simple: scrapeCantubeautySimple },
   };
 
@@ -3206,6 +3264,7 @@
         'babaria.es': 'babaria',
         'sarahk.com.br': 'sarahk',
         'sheamiracles.com': 'sheamiracles',
+        'al-dawaa.com': 'creme21',
         'macadamiahair.com': 'macadamiahair',
         'cantubeauty.com': 'cantubeauty',
       };
@@ -3261,6 +3320,7 @@
     { name: 'Babaria', domain: 'babaria.es', key: 'babaria', example: 'https://babaria.es/en/producto/face-serum-collagen/' },
     { name: 'Sarah K', domain: 'sarahk.com.br', key: 'sarahk', example: 'https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2' },
     { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
+    { name: 'Creme 21', domain: 'al-dawaa.com', key: 'creme21', example: 'https://www.al-dawaa.com/en/p/209943/creame-21-body-lotion-ultra-dry-skin-almond-oil-600-ml' },
     { name: 'Macadamia Hair', domain: 'macadamiahair.com', key: 'macadamiahair', example: 'https://www.macadamiahair.com/products/healing-oil-spray' },
     { name: 'Cantu Shea Beauty', domain: 'cantubeauty.com', key: 'cantubeauty', example: 'https://www.cantubeauty.com/products/curls-coils-waves/coconut-curling-cream/' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key] }));
