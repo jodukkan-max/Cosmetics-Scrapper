@@ -3045,6 +3045,55 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── ACM Laboratoire (Shopify — ld+json Product, ImageObject, array offers) ──
+  async function scrapeAcmSimple(ctx) {
+    const html = ctx.mainHtml;
+    const blocks = ldBlocks(html);
+
+    let product = null;
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { product = j; break; }
+      } catch (e) {}
+    }
+
+    const title = decodeEntities((product && product.name) || '');
+
+    // SKU & Price: offers is an array
+    let sku = '', price = '';
+    if (product && product.offers) {
+      const offersArray = Array.isArray(product.offers) ? product.offers : [product.offers];
+      const first = offersArray[0] || {};
+      sku = first.sku || product.sku || '';
+      if (typeof first.price !== 'undefined') price = String(first.price);
+    }
+
+    // Description from product JSON-LD
+    const description = decodeEntities((product && product.description || '').trim());
+
+    // Images: handle ImageObject format (image.url or image is string)
+    let images = [];
+    if (product && product.image) {
+      if (Array.isArray(product.image)) {
+        images = product.image.map(img => {
+          const u = (typeof img === 'object' && img.url) ? img.url : String(img);
+          return u.replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/[?&]v=\d+;width=\d+&/g, '?');
+        });
+      } else if (typeof product.image === 'object' && product.image.url) {
+        images = [product.image.url.replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, '')];
+      } else {
+        images = [String(product.image).replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, '')];
+      }
+    }
+    images = [...new Set(images)].slice(0, 4);
+
+    // Categories from product JSON-LD
+    const categories = (product && product.category) || '';
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Uriage (Drupal custom — HTML microdata + gallery) ──────────────────────
   async function scrapeUriageSimple(ctx) {
     const html = ctx.mainHtml;
@@ -3414,6 +3463,7 @@
     sarahk: { variable: scrapeSarakhSimple, simple: scrapeSarakhSimple },
     sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
     macadamiahair: { variable: scrapeMacadamiahairSimple, simple: scrapeMacadamiahairSimple },
+    acm: { variable: scrapeAcmSimple, simple: scrapeAcmSimple },
     uriage: { variable: scrapeUriageSimple, simple: scrapeUriageSimple },
     sebamed: { variable: scrapeSebamedSimple, simple: scrapeSebamedSimple },
     filorga: { variable: scrapeFilorgaSimple, simple: scrapeFilorgaSimple },
@@ -3445,6 +3495,7 @@
         'babaria.es': 'babaria',
         'sarahk.com.br': 'sarahk',
         'sheamiracles.com': 'sheamiracles',
+        'labo-acm.com': 'acm',
         'uriage.com': 'uriage',
         'filorga.com': 'filorga',
         'sebamed.com': 'sebamed',
@@ -3504,6 +3555,7 @@
     { name: 'Babaria', domain: 'babaria.es', key: 'babaria', example: 'https://babaria.es/en/producto/face-serum-collagen/' },
     { name: 'Sarah K', domain: 'sarahk.com.br', key: 'sarahk', example: 'https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2' },
     { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
+    { name: 'ACM Laboratoire', domain: 'labo-acm.com', key: 'acm', example: 'https://labo-acm.com/en/products/shine-reducing-skincare' },
     { name: 'Uriage Eau Thermale', domain: 'uriage.com', key: 'uriage', example: 'https://www.uriage.com/MT/en/products/unctuous-body-balm' },
     { name: 'Filorga Laboratoires Paris', domain: 'filorga.com', key: 'filorga', example: 'https://int.filorga.com/products/ncef-revitalize-creme' },
     { name: 'Seba Med', domain: 'sebamed.com', key: 'sebamed', example: 'https://sebamed.com/en/p/antibacterial-cleansing-foam/' },
