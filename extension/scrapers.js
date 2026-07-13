@@ -2109,10 +2109,19 @@
   async function scrapeBielendaSimple(ctx) {
     const html = ctx.mainHtml;
     const title = decodeEntities(((html.match(/property="og:title"\s+content="([^"]+)"/) || [])[1] || (html.match(/<title>([^<]+)<\/title>/) || [])[1] || '')).replace(/\s*-\s*Bielenda\s*$/i, '').trim();
-    const gStart = html.indexOf('id="product-gallery"');
-    const gBlock = gStart !== -1 ? html.slice(gStart, html.indexOf('</div>', gStart)) : '';
-    const images = [...new Set([...gBlock.matchAll(/src="([^"]+\.(?:png|jpg|jpeg|webp))"/gi)].map(m => m[1]))];
-    const sku = (gBlock.match(/(\d{13})/) || [])[1] || '';
+    // Parse #product-gallery with DOM parser to avoid nested-div slicing bugs
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const gallery = doc.getElementById('product-gallery');
+    let images = gallery
+      ? [...gallery.querySelectorAll('img[src]')].map(img => img.getAttribute('src')).filter(Boolean)
+      : [];
+    // Resolve relative URLs
+    let origin;
+    try { origin = new URL(ctx.url).origin; } catch (e) { origin = ''; }
+    if (origin) images = images.map(src => /^https?:\/\//.test(src) ? src : new URL(src, ctx.url).href);
+    // Deduplicate
+    images = [...new Set(images)];
+    const sku = (html.match(/(\d{13})/) || [])[1] || '';
     let description = '';
     const dStart = html.search(/Product description<\/span>/i);
     if (dStart !== -1) { const h5end = html.indexOf('</h5>', dStart); const after = html.slice(h5end + 5); const ns = after.search(/<h5[^>]*section-title/i); description = decodeEntities((ns !== -1 ? after.slice(0, ns) : after.slice(0, 2000)).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()); }
