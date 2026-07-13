@@ -3045,6 +3045,55 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Cantu Shea Beauty (custom WP — itemprop + owl carousel) ────────────────
+  async function scrapeCantubeautySimple(ctx) {
+    const html = ctx.mainHtml;
+
+    // Title: <h1 itemprop="name">
+    const h1Match = html.match(/<h1[^>]*itemprop="name"[^>]*>([\s\S]*?)<\/h1>/i);
+    const title = decodeEntities(h1Match ? h1Match[1].replace(/<[^>]+>/g, '').trim() : '');
+
+    // SKU: not available
+    const sku = '';
+
+    // Description: from .product-description div
+    let description = '';
+    const descMatch = html.match(/<div\b[^>]*class="[^"]*product-description[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    if (descMatch) {
+      description = decodeEntities(descMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+    if (!description) {
+      const ogDesc = (html.match(/property="og:description"\s+content="([^"]+)"/) || [])[1] || '';
+      description = decodeEntities(ogDesc.trim());
+    }
+
+    // Price: not available
+    const price = '';
+
+    // Categories: from breadcrumbs
+    let categories = '';
+    const bcMatch = html.match(/<ul\b[^>]*class="[^"]*breadcrumbs[^"]*"[^>]*>([\s\S]*?)<\/ul>/i);
+    if (bcMatch) {
+      const items = [...bcMatch[1].matchAll(/<a\b[^>]*>([^<]+)<\/a>/gi)];
+      // Skip first (Home) and last (product name)
+      const cats = items.slice(1, -1).map(m => decodeEntities(m[1].trim()));
+      categories = cats.filter(Boolean).join(' > ');
+    }
+
+    // Images: from owl carousel with type- prefix classes
+    let images = [];
+    const imgClassMatches = [...html.matchAll(/class="type-(https:\/\/cpm-api\.pdcwellness\.com\/storage\/media\/[^"]+)"/gi)];
+    images = imgClassMatches.map(m => m[1]);
+    // Fallback: og:image
+    if (!images.length) {
+      const ogImg = (html.match(/property="og:image:secure_url"\s+content="([^"]+)"/) || [])[1] || (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1];
+      if (ogImg) images = [ogImg];
+    }
+    images = [...new Set(images)].slice(0, 4);
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Clamanti (Magento 2 — ld+json + fotorama gallery) ──────────────────────
   async function scrapeClamantiSimple(ctx) {
     const html = ctx.mainHtml;
@@ -3130,6 +3179,7 @@
     sarahk: { variable: scrapeSarakhSimple, simple: scrapeSarakhSimple },
     sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
     macadamiahair: { variable: scrapeMacadamiahairSimple, simple: scrapeMacadamiahairSimple },
+    cantubeauty: { variable: scrapeCantubeautySimple, simple: scrapeCantubeautySimple },
   };
 
   // Detect site from a URL hostname.
@@ -3157,6 +3207,7 @@
         'sarahk.com.br': 'sarahk',
         'sheamiracles.com': 'sheamiracles',
         'macadamiahair.com': 'macadamiahair',
+        'cantubeauty.com': 'cantubeauty',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -3211,6 +3262,7 @@
     { name: 'Sarah K', domain: 'sarahk.com.br', key: 'sarahk', example: 'https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2' },
     { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
     { name: 'Macadamia Hair', domain: 'macadamiahair.com', key: 'macadamiahair', example: 'https://www.macadamiahair.com/products/healing-oil-spray' },
+    { name: 'Cantu Shea Beauty', domain: 'cantubeauty.com', key: 'cantubeauty', example: 'https://www.cantubeauty.com/products/curls-coils-waves/coconut-curling-cream/' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key] }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
