@@ -3095,6 +3095,61 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── SVR Laboratoire (Shopify — ld+json Product + var meta fallback) ──────
+  async function scrapeSvrSimple(ctx) {
+    const html = ctx.mainHtml;
+    const blocks = ldBlocks(html);
+
+    let product = null;
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { product = j; break; }
+      } catch (e) {}
+    }
+
+    const title = decodeEntities((product && product.name) || '');
+
+    // SKU & Price: offers is an array, use first variant
+    let sku = '', price = '';
+    if (product && product.offers) {
+      const offersArray = Array.isArray(product.offers) ? product.offers : [product.offers];
+      const first = offersArray[0] || {};
+      sku = first.sku || product.sku || '';
+      if (typeof first.price !== 'undefined') price = String(first.price);
+    }
+
+    // Description from product JSON-LD
+    const description = decodeEntities((product && product.description || '').trim());
+
+    // Categories from product JSON-LD
+    const categories = (product && product.category) || '';
+
+    // Images: ImageObject format (image.url)
+    let images = [];
+    if (product && product.image) {
+      if (Array.isArray(product.image)) {
+        images = product.image.map(img => {
+          const u = (typeof img === 'object' && img.url) ? img.url : String(img);
+          return u.replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, '');
+        });
+      } else if (typeof product.image === 'object' && product.image.url) {
+        images = [product.image.url.replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, '')];
+      } else {
+        images = [String(product.image).replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, '')];
+      }
+    }
+    // Fallback: og:image
+    if (!images.length) {
+      const ogImg = (html.match(/property="og:image:secure_url"\s+content="([^"]+)"/) || [])[1]
+        || (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1];
+      if (ogImg) images = [ogImg.replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, '')];
+    }
+    images = [...new Set(images)].slice(0, 4);
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Isispharma (WordPress custom — Yoast ld+json, slider data-zoom) ──────
   async function scrapeIsispharmaSimple(ctx) {
     const html = ctx.mainHtml;
@@ -3556,6 +3611,7 @@
     sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
     macadamiahair: { variable: scrapeMacadamiahairSimple, simple: scrapeMacadamiahairSimple },
     acm: { variable: scrapeAcmSimple, simple: scrapeAcmSimple },
+    svr: { variable: scrapeSvrSimple, simple: scrapeSvrSimple },
     isispharma: { variable: scrapeIsispharmaSimple, simple: scrapeIsispharmaSimple },
     uriage: { variable: scrapeUriageSimple, simple: scrapeUriageSimple },
     sebamed: { variable: scrapeSebamedSimple, simple: scrapeSebamedSimple },
@@ -3588,6 +3644,7 @@
         'babaria.es': 'babaria',
         'sarahk.com.br': 'sarahk',
         'sheamiracles.com': 'sheamiracles',
+        'svr.com': 'svr',
         'isispharma.com': 'isispharma',
         'labo-acm.com': 'acm',
         'uriage.com': 'uriage',
@@ -3649,6 +3706,7 @@
     { name: 'Babaria', domain: 'babaria.es', key: 'babaria', example: 'https://babaria.es/en/producto/face-serum-collagen/' },
     { name: 'Sarah K', domain: 'sarahk.com.br', key: 'sarahk', example: 'https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2' },
     { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
+    { name: 'SVR Laboratoire', domain: 'svr.com', key: 'svr', example: 'https://fr.svr.com/en/products/topialyse-gel-lavant-2' },
     { name: 'Isispharma', domain: 'isispharma.com', key: 'isispharma', example: 'https://www.isispharma.com/en/product/ato-balm/' },
     { name: 'ACM Laboratoire', domain: 'labo-acm.com', key: 'acm', example: 'https://labo-acm.com/en/products/shine-reducing-skincare' },
     { name: 'Uriage Eau Thermale', domain: 'uriage.com', key: 'uriage', example: 'https://www.uriage.com/MT/en/products/unctuous-body-balm' },
