@@ -3095,6 +3095,51 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Eucerin (JSON-LD Product + ImageObject blocks — catalog page) ──────
+  async function scrapeEucerinSimple(ctx) {
+    const html = ctx.mainHtml;
+    const blocks = ldBlocks(html);
+
+    let product = null;
+    const imgObjects = [];
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { product = j; }
+        if (j['@type'] === 'ImageObject' && j.image) { imgObjects.push(j.image); }
+      } catch (e) {}
+    }
+
+    const title = decodeEntities((product && product.name) || '');
+    const description = decodeEntities((product && product.description || '').trim());
+    const sku = (product && product.sku) || '';
+
+    // No price (catalog page)
+    const price = '';
+
+    // Images: from Product.image (array of strings) + ImageObject.image fields
+    let images = [];
+    if (product && product.image) {
+      const pImgs = Array.isArray(product.image) ? product.image : [product.image];
+      images = pImgs.filter(Boolean);
+    }
+    images = [...images, ...imgObjects];
+    images = [...new Set(images)].slice(0, 4);
+
+    // Categories: from <title> tag "Product | Category | Brand"
+    let categories = '';
+    const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+    if (titleMatch) {
+      const parts = titleMatch[1].split('|').map(s => s.trim());
+      if (parts.length >= 3) {
+        // Exclude last part (brand) and first part (product name)
+        categories = parts.slice(1, parts.length - 1).join(' > ') || parts[1] || '';
+      }
+    }
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── ISDIN (Drupal 7 — h1 title, og meta, indicaciones description, more-info-image) ──
   async function scrapeIsdinSimple(ctx) {
     const html = ctx.mainHtml;
@@ -3729,6 +3774,7 @@
     sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
     macadamiahair: { variable: scrapeMacadamiahairSimple, simple: scrapeMacadamiahairSimple },
     acm: { variable: scrapeAcmSimple, simple: scrapeAcmSimple },
+    eucerin: { variable: scrapeEucerinSimple, simple: scrapeEucerinSimple },
     isdin: { variable: scrapeIsdinSimple, simple: scrapeIsdinSimple },
     bioderma: { variable: scrapeBiodermaSimple, simple: scrapeBiodermaSimple },
     svr: { variable: scrapeSvrSimple, simple: scrapeSvrSimple },
@@ -3764,6 +3810,7 @@
         'babaria.es': 'babaria',
         'sarahk.com.br': 'sarahk',
         'sheamiracles.com': 'sheamiracles',
+        'eucerin-me.com': 'eucerin',
         'isdin.com': 'isdin',
         'bioderma.ae': 'bioderma',
         'svr.com': 'svr',
@@ -3828,6 +3875,7 @@
     { name: 'Babaria', domain: 'babaria.es', key: 'babaria', example: 'https://babaria.es/en/producto/face-serum-collagen/' },
     { name: 'Sarah K', domain: 'sarahk.com.br', key: 'sarahk', example: 'https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2' },
     { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
+    { name: 'Eucerin', domain: 'eucerin-me.com', key: 'eucerin', example: 'https://www.en.eucerin-me.com/products/dermopure-clinical/scrub' },
     { name: 'ISDIN', domain: 'isdin.com', key: 'isdin', example: 'https://www.isdin.com/en-AE/product/isdinceutics/age-reverse-night' },
     { name: 'Bioderma', domain: 'bioderma.ae', key: 'bioderma', example: 'https://www.bioderma.ae/our-products/atoderm/creme' },
     { name: 'SVR Laboratoire', domain: 'svr.com', key: 'svr', example: 'https://fr.svr.com/en/products/topialyse-gel-lavant-2' },
