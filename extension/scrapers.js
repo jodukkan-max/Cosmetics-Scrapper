@@ -3094,6 +3094,97 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Isispharma (WordPress custom — Yoast ld+json, slider data-zoom) ──────
+  async function scrapeIsispharmaSimple(ctx) {
+    const html = ctx.mainHtml;
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+
+    // Title: from h1.spt_header--title
+    let title = '';
+    const h1El = doc.querySelector('h1.spt_header--title');
+    if (h1El) title = h1El.textContent.trim();
+
+    // Yoast JSON-LD in @graph array
+    let productObj = null, breadcrumbObj = null;
+    const ldScripts = [...doc.querySelectorAll('script[type="application/ld+json"]')];
+    for (const s of ldScripts) {
+      try {
+        const obj = JSON.parse(s.textContent);
+        if (obj['@type'] === 'Product') productObj = obj;
+        if (obj['@type'] === 'BreadcrumbList') breadcrumbObj = obj;
+        if (obj['@graph']) {
+          for (const node of obj['@graph']) {
+            if (node['@type'] === 'Product') productObj = node;
+            if (node['@type'] === 'BreadcrumbList') breadcrumbObj = node;
+          }
+        }
+      } catch (e) {}
+    }
+
+    // Title from JSON-LD as fallback
+    if (!title && productObj && productObj.name) title = productObj.name;
+
+    // SKU: from JSON-LD or body class attribute
+    let sku = '';
+    if (productObj) {
+      sku = productObj.sku || '';
+      if (!sku || sku === 'null') {
+        // Try body class for range slug
+        const bodyMatch = html.match(/class="[^"]*postid-(\d+)[^"]*"/);
+        if (bodyMatch) sku = bodyMatch[1];
+      }
+    }
+
+    // Description: from JSON-LD
+    let description = '';
+    if (productObj && productObj.description) {
+      description = decodeEntities(productObj.description.trim());
+    }
+    // Fallback: og:description
+    if (!description) {
+      const ogD = (html.match(/<meta[^>]*property="og:description"[^>]*content="([^"]+)"/) || [])[1] || '';
+      description = decodeEntities(ogD.trim());
+    }
+
+    // Price: not available on WordPress catalog page
+    const price = '';
+
+    // Categories: from body class range-slug
+    let categories = '';
+    const rangeMatch = html.match(/range-slug-color-([a-zA-Z0-9_-]+)/);
+    if (rangeMatch) {
+      let rangeName = rangeMatch[1];
+      // Convert slug to readable name (e.g., "Secalia" from "secalia")
+      if (rangeName.length > 0) {
+        rangeName = rangeName.charAt(0).toUpperCase() + rangeName.slice(1);
+      }
+      categories = rangeName;
+    }
+    // If we have a breadcrumb JSON-LD with more detail
+    if (breadcrumbObj && breadcrumbObj.itemListElement) {
+      const items = breadcrumbObj.itemListElement
+        .map(e => (e.item ? e.item.name : e.name) || '')
+        .filter(n => n && !/^accueil|home$/i.test(n) && n !== title);
+      if (items.length) categories = items.join(' > ');
+    }
+
+    // Images: from slider_trans data-zoom attributes (full-size)
+    let images = [];
+    const zoomImgs = doc.querySelectorAll('.slider_trans--zoom-item-img[data-zoom]');
+    for (const img of zoomImgs) {
+      const zoomUrl = img.getAttribute('data-zoom');
+      if (zoomUrl) images.push(zoomUrl);
+    }
+    // Fallback: og:image
+    if (!images.length) {
+      const ogImg = (html.match(/<meta[^>]*property="og:image"[^>]*content="([^"]+)"/) || [])[1];
+      if (ogImg) images = [ogImg];
+    }
+    images = [...new Set(images)].slice(0, 4);
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Uriage (Drupal custom — HTML microdata + gallery) ──────────────────────
   async function scrapeUriageSimple(ctx) {
     const html = ctx.mainHtml;
@@ -3464,6 +3555,7 @@
     sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
     macadamiahair: { variable: scrapeMacadamiahairSimple, simple: scrapeMacadamiahairSimple },
     acm: { variable: scrapeAcmSimple, simple: scrapeAcmSimple },
+    isispharma: { variable: scrapeIsispharmaSimple, simple: scrapeIsispharmaSimple },
     uriage: { variable: scrapeUriageSimple, simple: scrapeUriageSimple },
     sebamed: { variable: scrapeSebamedSimple, simple: scrapeSebamedSimple },
     filorga: { variable: scrapeFilorgaSimple, simple: scrapeFilorgaSimple },
@@ -3495,6 +3587,7 @@
         'babaria.es': 'babaria',
         'sarahk.com.br': 'sarahk',
         'sheamiracles.com': 'sheamiracles',
+        'isispharma.com': 'isispharma',
         'labo-acm.com': 'acm',
         'uriage.com': 'uriage',
         'filorga.com': 'filorga',
@@ -3555,6 +3648,7 @@
     { name: 'Babaria', domain: 'babaria.es', key: 'babaria', example: 'https://babaria.es/en/producto/face-serum-collagen/' },
     { name: 'Sarah K', domain: 'sarahk.com.br', key: 'sarahk', example: 'https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2' },
     { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
+    { name: 'Isispharma', domain: 'isispharma.com', key: 'isispharma', example: 'https://www.isispharma.com/en/product/ato-balm/' },
     { name: 'ACM Laboratoire', domain: 'labo-acm.com', key: 'acm', example: 'https://labo-acm.com/en/products/shine-reducing-skincare' },
     { name: 'Uriage Eau Thermale', domain: 'uriage.com', key: 'uriage', example: 'https://www.uriage.com/MT/en/products/unctuous-body-balm' },
     { name: 'Filorga Laboratoires Paris', domain: 'filorga.com', key: 'filorga', example: 'https://int.filorga.com/products/ncef-revitalize-creme' },
