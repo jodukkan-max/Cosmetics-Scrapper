@@ -3095,6 +3095,74 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── ISDIN (Drupal 7 — h1 title, og meta, indicaciones description, more-info-image) ──
+  async function scrapeIsdinSimple(ctx) {
+    const html = ctx.mainHtml;
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    // Title: h1 inside .product_title
+    const h1 = doc.querySelector('.product_title h1');
+    const title = h1 ? decodeEntities(h1.textContent.replace(/\s+/g, ' ').trim()) : '';
+
+    // Short description / tagline: h2.frase_vendedora
+    const frase = doc.querySelector('h2.frase_vendedora');
+    const phrase = frase ? decodeEntities(frase.textContent.replace(/\s+/g, ' ').trim()) : '';
+
+    // Full description: div.indicaciones-main_info, fallback to meta[name="description"]
+    const indicEl = doc.querySelector('.indicaciones-main_info');
+    let description = '';
+    if (indicEl) {
+      description = decodeEntities(indicEl.textContent.replace(/\s+/g, ' ').trim());
+    }
+    if (!description) {
+      const metaDesc = doc.querySelector('meta[name="description"]');
+      description = metaDesc ? metaDesc.getAttribute('content').trim() : '';
+    }
+    // Prepend phrase if different
+    if (phrase && !description.startsWith(phrase)) {
+      description = phrase + '. ' + description;
+    }
+
+    // Image: .more-info-image img, fallback to og:image
+    let images = [];
+    const mainImg = doc.querySelector('.more-info-image img');
+    if (mainImg) {
+      const src = mainImg.getAttribute('src');
+      if (src) {
+        // Resolve relative URLs
+        const base = 'https://www.isdin.com';
+        images.push(src.startsWith('http') ? src : base + (src.startsWith('/') ? '' : '/') + src.replace(/^\.\/?/, '/'));
+      }
+    }
+    if (!images.length) {
+      const ogImg = doc.querySelector('meta[property="og:image"]');
+      if (ogImg) {
+        const content = ogImg.getAttribute('content');
+        if (content) images.push(content);
+      }
+    }
+    images = [...new Set(images)].slice(0, 4);
+
+    // SKU & Price: not available on catalog pages
+    const price = '';
+    const sku = '';
+
+    // Categories: from og:title or URL path
+    let categories = '';
+    const canonical = doc.querySelector('link[rel="canonical"]');
+    if (canonical) {
+      const href = canonical.getAttribute('href') || '';
+      const pathMatch = href.replace(/https?:\/\/[^\/]+/, '').match(/\/product\/([^\/]+)/);
+      if (pathMatch) {
+        categories = pathMatch[1].replace(/[-_]/g, ' ');
+        categories = categories.replace(/\b\w/g, c => c.toUpperCase());
+      }
+    }
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Bioderma (Drupal microdata — itemprop schema + fancybox gallery) ──────
   async function scrapeBiodermaSimple(ctx) {
     const html = ctx.mainHtml;
@@ -3661,6 +3729,7 @@
     sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
     macadamiahair: { variable: scrapeMacadamiahairSimple, simple: scrapeMacadamiahairSimple },
     acm: { variable: scrapeAcmSimple, simple: scrapeAcmSimple },
+    isdin: { variable: scrapeIsdinSimple, simple: scrapeIsdinSimple },
     bioderma: { variable: scrapeBiodermaSimple, simple: scrapeBiodermaSimple },
     svr: { variable: scrapeSvrSimple, simple: scrapeSvrSimple },
     isispharma: { variable: scrapeIsispharmaSimple, simple: scrapeIsispharmaSimple },
@@ -3695,6 +3764,7 @@
         'babaria.es': 'babaria',
         'sarahk.com.br': 'sarahk',
         'sheamiracles.com': 'sheamiracles',
+        'isdin.com': 'isdin',
         'bioderma.ae': 'bioderma',
         'svr.com': 'svr',
         'isispharma.com': 'isispharma',
@@ -3758,6 +3828,7 @@
     { name: 'Babaria', domain: 'babaria.es', key: 'babaria', example: 'https://babaria.es/en/producto/face-serum-collagen/' },
     { name: 'Sarah K', domain: 'sarahk.com.br', key: 'sarahk', example: 'https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2' },
     { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
+    { name: 'ISDIN', domain: 'isdin.com', key: 'isdin', example: 'https://www.isdin.com/en-AE/product/isdinceutics/age-reverse-night' },
     { name: 'Bioderma', domain: 'bioderma.ae', key: 'bioderma', example: 'https://www.bioderma.ae/our-products/atoderm/creme' },
     { name: 'SVR Laboratoire', domain: 'svr.com', key: 'svr', example: 'https://fr.svr.com/en/products/topialyse-gel-lavant-2' },
     { name: 'Isispharma', domain: 'isispharma.com', key: 'isispharma', example: 'https://www.isispharma.com/en/product/ato-balm/' },
