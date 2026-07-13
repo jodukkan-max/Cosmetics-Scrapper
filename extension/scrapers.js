@@ -2100,8 +2100,12 @@
     if (delM && insM) { regular = woocommercePrice(delM[1]); sale = woocommercePrice(insM[1]); }
     else regular = woocommercePrice((html.match(/woocommerce-Price-amount[^>]*>([\s\S]*?)<\/span>/) || [])[1]);
     let categories = '';
-    const bc = html.match(/woocommerce-breadcrumb[^>]*>([\s\S]*?)<\/nav>/i);
-    if (bc) categories = [...bc[1].matchAll(/>([^<>]+)</g)].map(m => decodeEntities(m[1].trim())).filter(c => c && !/^home$/i.test(c) && c.toLowerCase() !== title.toLowerCase()).join('>');
+    const bc = html.match(/<nav[^>]*class="[^"]*woocommerce-breadcrumb[^"]*"[^>]*>([\s\S]*?)<\/nav>/i);
+    if (bc) {
+      categories = [...bc[1].matchAll(/<a\b[^>]*>([^<]+)<\/a>/gi)]
+        .map(m => decodeEntities(m[1].trim()))
+        .filter(c => c && !/^home$/i.test(c))
+        .join(' > ');
     return { rows: simpleRow({ sku, name: title, description, regularPrice: regular, salePrice: sale, categories, images }), title };
   }
 
@@ -2658,6 +2662,389 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Bruno Vassari (Shopify — ld+json Product block) ────────────────────────
+  async function scrapeBrunovassariSimple(ctx) {
+    const html = ctx.mainHtml;
+    const blocks = ldBlocks(html);
+
+    // Parse the Product JSON-LD (single-line, no unescaped newlines)
+    let product = null;
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { product = j; break; }
+      } catch (e) {}
+    }
+
+    // Also parse var meta for product type/category as fallback
+    let productType = '';
+    const metaM = html.match(/var meta = ({.*?});\s*$/m);
+    if (metaM) {
+      try {
+        const meta = JSON.parse(metaM[1]);
+        if (meta.product && meta.product.type) productType = meta.product.type;
+      } catch (e) {}
+    }
+
+    const title = decodeEntities((product && product.name) || '');
+    const sku = (product && product.sku) || '';
+    const description = decodeEntities((product && product.description || '').trim());
+    const price = product && product.offers && product.offers.price ? product.offers.price : '';
+
+    // Images: product.image from ld+json (strip ?v= and &width= params)
+    let images = [];
+    if (product && product.image) {
+      images = [product.image.replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, '')];
+    }
+    // Fallback: og:image
+    if (!images.length) {
+      const ogImg = (html.match(/property="og:image:secure_url"\s+content="([^"]+)"/) || [])[1] || (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1];
+      if (ogImg) images = [ogImg];
+    }
+    images = [...new Set(images)].slice(0, 4);
+
+    // Categories: "category" field from ld+json or product.type from var meta
+    const category = (product && product.category) || productType;
+    const categories = category || '';
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
+  // ── Beesline (Shopify — ld+json Product block) ─────────────────────────────
+  async function scrapeBeeslineSimple(ctx) {
+    const html = ctx.mainHtml;
+    const blocks = ldBlocks(html);
+
+    // Parse the Product JSON-LD (single-line, no unescaped newlines)
+    let product = null;
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { product = j; break; }
+      } catch (e) {}
+    }
+
+    const title = decodeEntities((product && product.name) || '');
+    const sku = (product && product.sku) || '';
+    const description = decodeEntities((product && product.description || '').trim());
+    const price = product && product.offers && product.offers.price ? product.offers.price : '';
+
+    // Images: product.image from ld+json (strip ?v= and &width= params)
+    let images = [];
+    if (product && product.image) {
+      images = [product.image.replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, '')];
+    }
+    // Fallback: og:image
+    if (!images.length) {
+      const ogImg = (html.match(/property="og:image:secure_url"\s+content="([^"]+)"/) || [])[1] || (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1];
+      if (ogImg) images = [ogImg];
+    }
+    images = [...new Set(images)].slice(0, 4);
+
+    // Categories: "category" field from ld+json
+    const categories = (product && product.category) || '';
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
+  // ── Dermaliscio (WooCommerce — ld+json Product block) ─────────────────────
+  async function scrapeDermaliscioSimple(ctx) {
+    const html = ctx.mainHtml;
+    const blocks = ldBlocks(html);
+
+    // Parse the Product JSON-LD
+    let product = null;
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { product = j; break; }
+        // Also handle @graph arrays
+        if (j['@graph']) {
+          for (const node of j['@graph']) {
+            if (node['@type'] === 'Product') { product = node; break; }
+          }
+          if (product) break;
+        }
+      } catch (e) {}
+    }
+
+    const title = decodeEntities(decodeEntities((product && product.name) || ''));
+    const sku = product && product.sku != null ? String(product.sku) : '';
+    const description = decodeEntities(decodeEntities((product && product.description || '').trim()))
+      .replace(/\s+/g, ' ');
+    const price = product && product.offers
+      ? (Array.isArray(product.offers) ? product.offers[0].price : product.offers.price)
+      : '';
+
+    // Images: product.image from ld+json, plus gallery thumbnails
+    let images = [];
+    if (product && product.image) {
+      images = [product.image];
+    }
+    // Try WooCommerce gallery thumbnails (data-src with -100x100 pattern)
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const galleryThumbs = doc.querySelectorAll('.woocommerce-product-gallery__image img[data-src]');
+    for (const img of galleryThumbs) {
+      let src = img.getAttribute('data-src');
+      if (!src) continue;
+      // Strip WordPress thumbnail suffix to get full-size URL
+      src = src.replace(/-\d+x\d+(?=\.(?:jpg|png|jpeg|webp)$)/i, '');
+      images.push(src);
+    }
+    // Fallback: og:image
+    if (!images.length) {
+      const ogImg = (html.match(/property="og:image:secure_url"\s+content="([^"]+)"/) || [])[1] || (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1];
+      if (ogImg) images = [ogImg];
+    }
+    images = [...new Set(images)].slice(0, 4);
+
+    // Categories from BreadcrumbList (use the last/most detailed one)
+    let categories = '';
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        const list = j['@graph'] ? j['@graph'].find(n => n['@type'] === 'BreadcrumbList') : (j['@type'] === 'BreadcrumbList' ? j : null);
+        if (list && list.itemListElement) {
+          const items = list.itemListElement;
+          const cats = items.slice(1, -1).map(el => decodeEntities(decodeEntities((el.item && el.item.name) || el.name || '')));
+          const filtered = cats.filter(Boolean);
+          if (filtered.length) categories = filtered.join(' > ');
+        }
+      } catch (e) {}
+    }
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
+  // ── Babaria (WooCommerce — custom carousel, no Product ld+json) ─────────────
+  async function scrapeBabariaSimple(ctx) {
+    const html = ctx.mainHtml;
+
+    // Title: from <h1>
+    const titleMatch = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+    const title = decodeEntities(titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').trim() : '');
+
+    // SKU: from "REF:" text in the meta info list
+    const skuMatch = html.match(/REF\s*:\s*([^<\n]+)/i);
+    const sku = skuMatch ? skuMatch[1].trim() : '';
+
+    // Description: use og:description
+    const ogDesc = (html.match(/property="og:description"\s+content="([^"]+)"/) || [])[1] || '';
+    const description = decodeEntities(ogDesc.trim());
+
+    // Price: not available on this catalog-style page
+    const price = '';
+
+    // Categories: from woocommerce-breadcrumb nav
+    let categories = '';
+    const breadcrumbMatch = html.match(/<nav[^>]*class="[^"]*woocommerce-breadcrumb[^"]*"[^>]*>([\s\S]*?)<\/nav>/i);
+    if (breadcrumbMatch) {
+      const items = [...breadcrumbMatch[1].matchAll(/<a[^>]*>([^<]+)<\/a>/gi)];
+      // Skip last (product name itself)
+      const cats = items.slice(1, -1).map(m => decodeEntities(m[1].trim()));
+      categories = cats.filter(Boolean).join(' > ');
+    }
+    // Fallback: yoast BreadcrumbList
+    if (!categories) {
+      const blocks = ldBlocks(html);
+      for (const raw of blocks) {
+        try {
+          const j = JSON.parse(raw);
+          const list = j['@graph'] ? j['@graph'].find(n => n['@type'] === 'BreadcrumbList') : (j['@type'] === 'BreadcrumbList' ? j : null);
+          if (list && list.itemListElement) {
+            const items = list.itemListElement;
+            const cats = items.slice(1, -1).map(el => decodeEntities(decodeEntities((el.item && el.item.name) || el.name || '')));
+            const filtered = cats.filter(Boolean);
+            if (filtered.length) categories = filtered.join(' > ');
+          }
+        } catch (e) {}
+      }
+    }
+
+    // Images: from carouselproductthumbnail img tags, resolve relative URLs
+    let images = [];
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const productSection = doc.querySelector('.product.type-product .carousel-inner');
+    if (productSection) {
+      const imgEls = productSection.querySelectorAll('img[src]');
+      const baseURI = ctx.url;
+      images = [...imgEls].map(img => {
+        let src = img.getAttribute('src');
+        if (!src) return null;
+        // Resolve relative URLs
+        try {
+          return new URL(src, baseURI).href;
+        } catch (e) {
+          return null;
+        }
+      }).filter(Boolean);
+    }
+    // Fallback: og:image
+    if (!images.length) {
+      const ogImg = (html.match(/property="og:image:secure_url"\s+content="([^"]+)"/) || [])[1] || (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1];
+      if (ogImg) images = [ogImg];
+    }
+    // Filter out related product images (not from the carousel)
+    images = images.filter(url => !/-\d+x\d+(?=\.(?:jpg|png|jpeg|webp)$)/i.test(url));
+    images = [...new Set(images)].slice(0, 4);
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
+  // ── Sarah K (Elementor — single-produto, no Product ld+json) ──────────────
+  async function scrapeSarakhSimple(ctx) {
+    const html = ctx.mainHtml;
+
+    // Title: from elementor-heading-title h2
+    const h2Match = html.match(/<h2\b[^>]*class="[^"]*elementor-heading-title[^"]*"[^>]*>([\s\S]*?)<\/h2>/i);
+    const title = decodeEntities(h2Match ? h2Match[1].replace(/<[^>]+>/g, '').trim() : '');
+
+    // SKU: not available on this catalog-style page
+    const sku = '';
+
+    // Description: from og:description
+    const ogDesc = (html.match(/property="og:description"\s+content="([^"]+)"/) || [])[1] || '';
+    const description = decodeEntities(ogDesc.trim());
+
+    // Price: not available
+    const price = '';
+
+    // Categories: from rank-math BreadcrumbList JSON-LD
+    let categories = '';
+    const blocks = ldBlocks(html);
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        const list = j['@graph'] ? j['@graph'].find(n => n['@type'] === 'BreadcrumbList') : (j['@type'] === 'BreadcrumbList' ? j : null);
+        if (list && list.itemListElement) {
+          const items = list.itemListElement;
+          const cats = items.slice(1, -1).map(el => decodeEntities((el.item && el.item.name) || el.name || ''));
+          categories = cats.filter(Boolean).join(' > ');
+        }
+      } catch (e) {}
+    }
+
+    // Images: from elementor-widget-image in product content area
+    // Use DOMParser to extract absolute URLs from srcsets
+    let images = [];
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    // Find all images in the main product section — look for img inside elementor-widget-image
+    const widgetImgs = doc.querySelectorAll('.elementor-widget-image img[srcset]');
+    for (const img of widgetImgs) {
+      const srcset = img.getAttribute('srcset') || '';
+      // Extract the largest image URL (last in srcset, highest resolution)
+      const candidates = [...srcset.matchAll(/(https:\/\/www\.sarahk\.com\.br\/wp-content\/uploads\/[^\s]+?\.(?:png|jpg|jpeg|webp))\s+\d+w/g)];
+      if (candidates.length) {
+        const largest = candidates[candidates.length - 1][1];
+        images.push(largest);
+      } else {
+        // Fallback to src
+        const src = img.getAttribute('src');
+        if (src) {
+          try { images.push(new URL(src, ctx.url).href); } catch (e) {}
+        }
+      }
+    }
+    // Fallback: og:image
+    if (!images.length) {
+      const ogImg = (html.match(/property="og:image:secure_url"\s+content="([^"]+)"/) || [])[1] || (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1];
+      if (ogImg) images = [ogImg];
+    }
+    // Filter out logos and non-product images, remove dimension suffix
+    images = images
+      .filter(url => !/logo/i.test(url) && !/favicon/i.test(url))
+      .map(url => url.replace(/-\d+x\d+(?=\.(?:png|jpg|jpeg|webp)$)/i, ''));
+    images = [...new Set(images)].slice(0, 4);
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
+  // ── Shea Miracles (Magento 2 — dataLayer + fotorama gallery) ──────────────
+  async function scrapeSheamiraclesSimple(ctx) {
+    const html = ctx.mainHtml;
+
+    // Product data from dataLayer.push
+    let title = '', sku = '', price = '', categories = '', imageUrl = '';
+    const dlMatch = html.match(/dataLayer\.push\(\{"event":"productPage","product":(\{[^}]+\})\}\)/);
+    if (dlMatch) {
+      try {
+        const product = JSON.parse(dlMatch[1]);
+        title = decodeEntities(product.name || '');
+        sku = product.sku || '';
+        price = product.price != null ? String(product.price) : '';
+        categories = product.category || '';
+        imageUrl = product.image_url || '';
+      } catch (e) {}
+    }
+
+    // Description: itemprop="description" in product.attribute.overview
+    let description = '';
+    const descMatch = html.match(/itemprop="description"[^>]*>([\s\S]*?)<\/div>/i);
+    if (descMatch) {
+      description = decodeEntities(descMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+    if (!description) {
+      const ogDesc = (html.match(/property="og:description"\s+content="([^"]+)"/) || [])[1] || '';
+      description = decodeEntities(ogDesc.trim());
+    }
+
+    // Images from fotorama stage frames (full-size hrefs, strip cache path)
+    let images = [];
+    const frameMatches = [...html.matchAll(/class="fotorama__stage__frame[^"]*"\s[^>]*href="(https:\/\/sheamiracles\.com\/pub\/media\/catalog\/product\/cache\/[^"]+)"/gi)];
+    if (frameMatches.length) {
+      images = frameMatches.map(m => m[1]);
+    }
+    // Also try og:image if no fotorama found
+    if (!images.length) {
+      const ogImg = (html.match(/property="og:image:secure_url"\s+content="([^"]+)"/) || [])[1] || (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1];
+      if (ogImg) images = [ogImg];
+    }
+    images = [...new Set(images)].slice(0, 4);
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
+  // ── Macadamia Hair (Shopify — ld+json Product block) ──────────────────────
+  async function scrapeMacadamiahairSimple(ctx) {
+    const html = ctx.mainHtml;
+    const blocks = ldBlocks(html);
+
+    let product = null;
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { product = j; break; }
+      } catch (e) {}
+    }
+
+    const title = decodeEntities((product && product.name) || '');
+    const sku = (product && product.sku) || '';
+    const description = decodeEntities((product && product.description || '').trim()
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' '));
+    const price = product && product.offers && product.offers.price ? product.offers.price : '';
+
+    // Images: strip Shopify _NxN suffix, ?v= and &width= params
+    let images = [];
+    if (product && product.image) {
+      images = [product.image
+        .replace(/_\d+x\d+(?=\.(?:png|jpg|jpeg|webp))/i, '')
+        .replace(/[?&]v=\d+/, '')
+        .replace(/[?&]width=\d+/, '')
+        .replace(/\?$/, '')];
+    }
+    if (!images.length) {
+      const ogImg = (html.match(/property="og:image:secure_url"\s+content="([^"]+)"/) || [])[1] || (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1];
+      if (ogImg) images = [ogImg];
+    }
+    images = [...new Set(images)].slice(0, 4);
+
+    // Categories: not available in JSON-LD, empty
+    const categories = '';
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Clamanti (Magento 2 — ld+json + fotorama gallery) ──────────────────────
   async function scrapeClamantiSimple(ctx) {
     const html = ctx.mainHtml;
@@ -2736,6 +3123,13 @@
     makeover: { variable: scrapeMakeover, simple: scrapeMakeoverSimple },
     clamanti: { variable: scrapeClamantiSimple, simple: scrapeClamantiSimple },
     lacabine: { variable: scrapeLacabineSimple, simple: scrapeLacabineSimple },
+    brunovassari: { variable: scrapeBrunovassariSimple, simple: scrapeBrunovassariSimple },
+    beesline: { variable: scrapeBeeslineSimple, simple: scrapeBeeslineSimple },
+    dermaliscio: { variable: scrapeDermaliscioSimple, simple: scrapeDermaliscioSimple },
+    babaria: { variable: scrapeBabariaSimple, simple: scrapeBabariaSimple },
+    sarahk: { variable: scrapeSarakhSimple, simple: scrapeSarakhSimple },
+    sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
+    macadamiahair: { variable: scrapeMacadamiahairSimple, simple: scrapeMacadamiahairSimple },
   };
 
   // Detect site from a URL hostname.
@@ -2756,6 +3150,13 @@
         'makeoverparis.com': 'makeover',
         'clamanti.co.uk': 'clamanti',
         'lacabine.es': 'lacabine',
+        'brunovassari.com': 'brunovassari',
+        'beesline.com': 'beesline',
+        'dermaliscio.net': 'dermaliscio',
+        'babaria.es': 'babaria',
+        'sarahk.com.br': 'sarahk',
+        'sheamiracles.com': 'sheamiracles',
+        'macadamiahair.com': 'macadamiahair',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -2803,6 +3204,13 @@
     { name: 'MakeOver', domain: 'makeoverparis.com', key: 'makeover', example: 'http://makeoverparis.com/en/products.asp?id1=1&id2=8&id3=32' },
     { name: 'Clamanti', domain: 'clamanti.co.uk', key: 'clamanti', example: 'https://clamanti.co.uk/bielenda-neuro-retinol-advanced-moisturizing-face-serum-30-ml.html' },
     { name: 'laCabine', domain: 'lacabine.es', key: 'lacabine', example: 'https://lacabine.es/en/productos/364-hydranad-biphase-makeup-remover.html' },
+    { name: 'Bruno Vassari', domain: 'brunovassari.com', key: 'brunovassari', example: 'https://brunovassari.com/en-row/products/balance-fluid' },
+    { name: 'Beesline', domain: 'beesline.com', key: 'beesline', example: 'https://beesline.com/en-jo/products/propolis-facial-wash' },
+    { name: 'Dermaliscio', domain: 'dermaliscio.net', key: 'dermaliscio', example: 'https://dermaliscio.net/product/hyaluronic-acid-anti-wrinkles-lifting-cream-15000-p-p-m-dermaliscio-shade-50-sunscreen/' },
+    { name: 'Babaria', domain: 'babaria.es', key: 'babaria', example: 'https://babaria.es/en/producto/face-serum-collagen/' },
+    { name: 'Sarah K', domain: 'sarahk.com.br', key: 'sarahk', example: 'https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2' },
+    { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
+    { name: 'Macadamia Hair', domain: 'macadamiahair.com', key: 'macadamiahair', example: 'https://www.macadamiahair.com/products/healing-oil-spray' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key] }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
