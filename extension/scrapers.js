@@ -3095,6 +3095,56 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Bioderma (Drupal microdata — itemprop schema + fancybox gallery) ──────
+  async function scrapeBiodermaSimple(ctx) {
+    const html = ctx.mainHtml;
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    // Title: h1.title-1--product
+    const h1 = doc.querySelector('h1.title-1--product');
+    const title = h1 ? decodeEntities(h1.textContent.replace(/\s+/g, ' ').trim()) : '';
+
+    // Description: h2[itemprop="description"]
+    const descEl = doc.querySelector('h2[itemprop="description"]');
+    const description = descEl ? decodeEntities(descEl.textContent.replace(/\s+/g, ' ').trim()) : '';
+
+    // SKU: meta[itemprop="sku"]
+    const skuMeta = doc.querySelector('meta[itemprop="sku"]');
+    const sku = (skuMeta && skuMeta.getAttribute('content')) || '';
+
+    // Price: meta[itemprop="price"] — filter out 0.000000 (catalog pages)
+    const priceMeta = doc.querySelector('meta[itemprop="price"]');
+    let price = '';
+    if (priceMeta) {
+      const pv = priceMeta.getAttribute('content');
+      if (pv && pv !== '0.000000' && pv !== '0') price = pv;
+    }
+
+    // Images: from a.product-fancybox[data-fancybox="gallery"] href attributes
+    const fancyLinks = doc.querySelectorAll('a.product-fancybox[data-fancybox="gallery"]');
+    const images = [...new Set(
+      Array.from(fancyLinks)
+        .map(a => a.getAttribute('href'))
+        .filter(Boolean)
+    )].slice(0, 4);
+
+    // Categories: from BreadcrumbList microdata
+    let categories = '';
+    const bcItems = doc.querySelectorAll('.breadcrumb [itemprop="itemListElement"]');
+    const cats = [];
+    bcItems.forEach(item => {
+      const nameEl = item.querySelector('[itemprop="name"]');
+      if (nameEl) {
+        const name = nameEl.textContent.trim();
+        if (name && !/^home$/i.test(name)) cats.push(name);
+      }
+    });
+    categories = cats.join(' > ');
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── SVR Laboratoire (Shopify — ld+json Product + var meta fallback) ──────
   async function scrapeSvrSimple(ctx) {
     const html = ctx.mainHtml;
@@ -3611,6 +3661,7 @@
     sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
     macadamiahair: { variable: scrapeMacadamiahairSimple, simple: scrapeMacadamiahairSimple },
     acm: { variable: scrapeAcmSimple, simple: scrapeAcmSimple },
+    bioderma: { variable: scrapeBiodermaSimple, simple: scrapeBiodermaSimple },
     svr: { variable: scrapeSvrSimple, simple: scrapeSvrSimple },
     isispharma: { variable: scrapeIsispharmaSimple, simple: scrapeIsispharmaSimple },
     uriage: { variable: scrapeUriageSimple, simple: scrapeUriageSimple },
@@ -3644,6 +3695,7 @@
         'babaria.es': 'babaria',
         'sarahk.com.br': 'sarahk',
         'sheamiracles.com': 'sheamiracles',
+        'bioderma.ae': 'bioderma',
         'svr.com': 'svr',
         'isispharma.com': 'isispharma',
         'labo-acm.com': 'acm',
@@ -3706,6 +3758,7 @@
     { name: 'Babaria', domain: 'babaria.es', key: 'babaria', example: 'https://babaria.es/en/producto/face-serum-collagen/' },
     { name: 'Sarah K', domain: 'sarahk.com.br', key: 'sarahk', example: 'https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2' },
     { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
+    { name: 'Bioderma', domain: 'bioderma.ae', key: 'bioderma', example: 'https://www.bioderma.ae/our-products/atoderm/creme' },
     { name: 'SVR Laboratoire', domain: 'svr.com', key: 'svr', example: 'https://fr.svr.com/en/products/topialyse-gel-lavant-2' },
     { name: 'Isispharma', domain: 'isispharma.com', key: 'isispharma', example: 'https://www.isispharma.com/en/product/ato-balm/' },
     { name: 'ACM Laboratoire', domain: 'labo-acm.com', key: 'acm', example: 'https://labo-acm.com/en/products/shine-reducing-skincare' },
