@@ -2106,6 +2106,7 @@
         .map(m => decodeEntities(m[1].trim()))
         .filter(c => c && !/^home$/i.test(c))
         .join(' > ');
+    }
     return { rows: simpleRow({ sku, name: title, description, regularPrice: regular, salePrice: sale, categories, images }), title };
   }
 
