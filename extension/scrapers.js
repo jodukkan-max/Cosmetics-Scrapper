@@ -2614,6 +2614,50 @@
     return await fn(ctx);
   }
 
+  // ── LaCabine (PrestaShop — ld+json Product with offers.image gallery) ──────
+  async function scrapeLacabineSimple(ctx) {
+    const html = ctx.mainHtml;
+    const blocks = ldBlocks(html);
+
+    // Find the Product JSON-LD block and parse it
+    let product = null;
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { product = j; break; }
+      } catch (e) {}
+    }
+
+    const title = decodeEntities((product && product.name) || '');
+    const sku = (product && (product.sku || product.mpn)) || '';
+    const description = decodeEntities((product && product.description || '').trim());
+    const price = product && product.offers && product.offers.price ? product.offers.price : '';
+
+    // Images: offers.image array (large_default size) → strip to bare path for best resolution
+    let images = [];
+    if (product && product.offers && Array.isArray(product.offers.image)) {
+      images = product.offers.image;
+    }
+    // Fallback: single product.image
+    if (!images.length && product && product.image) {
+      images = [product.image];
+    }
+    images = [...new Set(images)].slice(0, 4);
+
+    // Categories: BreadcrumbList
+    let categories = '';
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'BreadcrumbList') {
+          categories = (j.itemListElement || []).map(i => i.name || (i.item && i.item.name)).filter(c => c && !/^home$/i.test(c) && c.toLowerCase() !== title.toLowerCase()).join('>');
+        }
+      } catch (e) {}
+    }
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Clamanti (Magento 2 — ld+json + fotorama gallery) ──────────────────────
   async function scrapeClamantiSimple(ctx) {
     const html = ctx.mainHtml;
@@ -2691,6 +2735,7 @@
     character: { variable: scrapeCharacter, simple: scrapeCharacterSimple },
     makeover: { variable: scrapeMakeover, simple: scrapeMakeoverSimple },
     clamanti: { variable: scrapeClamantiSimple, simple: scrapeClamantiSimple },
+    lacabine: { variable: scrapeLacabineSimple, simple: scrapeLacabineSimple },
   };
 
   // Detect site from a URL hostname.
@@ -2710,6 +2755,7 @@
         'summerfridays.com': 'summerfridays', 'charactercosmetics.in': 'character',
         'makeoverparis.com': 'makeover',
         'clamanti.co.uk': 'clamanti',
+        'lacabine.es': 'lacabine',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -2756,6 +2802,7 @@
     { name: 'Topface', domain: 'topfaceofficial.com', key: 'topface', example: 'https://topfaceofficial.com/products/aqua-tint-lip-cheek' },
     { name: 'MakeOver', domain: 'makeoverparis.com', key: 'makeover', example: 'http://makeoverparis.com/en/products.asp?id1=1&id2=8&id3=32' },
     { name: 'Clamanti', domain: 'clamanti.co.uk', key: 'clamanti', example: 'https://clamanti.co.uk/bielenda-neuro-retinol-advanced-moisturizing-face-serum-30-ml.html' },
+    { name: 'laCabine', domain: 'lacabine.es', key: 'lacabine', example: 'https://lacabine.es/en/productos/364-hydranad-biphase-makeup-remover.html' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key] }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
