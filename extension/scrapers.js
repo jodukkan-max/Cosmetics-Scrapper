@@ -3771,11 +3771,31 @@
       }
     }
 
-    // 5. Main product image from og:image
-    let mainImage = '';
-    const ogImgMatch = html.match(/property="og:image"\s+content="([^"]+)"/);
-    if (ogImgMatch) {
-      mainImage = ogImgMatch[1].replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, '');
+    // 5. Extract parent gallery images (up to 4) from product images in HTML
+    const firstSku = product.variants[0] ? (product.variants[0].sku || '') : '';  // e.g. DF120011
+    const imgRe = /(?:https?:)?\/\/(?:diegodallapalma|cdn\.shopify)\.com\/cdn\/shop\/(products|files)\/([^"\s&]+)/g;
+    const seenFilenames = new Set();
+    const parentImages = [];
+    let im;
+    while ((im = imgRe.exec(html))) {
+      const path = im[2];
+      if (!firstSku || !path.includes(firstSku)) continue;
+      if (/DF12110/.test(path)) continue;
+      // Strip _grande suffix and HTML entities
+      let clean = path.replace(/_grande/, '').replace(/&(?:amp;)?quot;?/g, '');
+      if (!/\.(jpg|jpeg|png|webp)/i.test(clean)) continue;
+      // Deduplicate by full filename (removes same image at different widths)
+      if (!seenFilenames.has(clean)) {
+        seenFilenames.add(clean);
+        const url = 'https://diegodallapalma.com/cdn/shop/' + im[1] + '/' + clean;
+        parentImages.push(url);
+      }
+      if (parentImages.length >= 4) break;
+    }
+    // Fallback: single og:image
+    if (!parentImages.length) {
+      const ogImgMatch = html.match(/property="og:image"\s+content="([^"]+)"/);
+      if (ogImgMatch) parentImages.push(ogImgMatch[1].replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, ''));
     }
 
     // 6. Description from meta description
@@ -3802,7 +3822,7 @@
       }
     } catch (e) {}
 
-    // 8. Build variant objects
+    // 9. Build variant objects
     const convertPrice = (cents) => {
       const num = parseFloat(cents);
       return isNaN(num) ? '' : (num / 100).toFixed(2);
@@ -3818,13 +3838,146 @@
         sku: v.sku || '',
         regularPrice: convertPrice(v.price),
         salePrice: '',
-        images: mainImage ? [mainImage] : [],
+        images: parentImages.length ? [parentImages[0]] : [],
         extras: [],
         colorCode: swatchUrl,
       };
     });
 
-    return { rows: variableRows(title, mainImage ? [mainImage] : [], description, '', categories, optionName, variants), title };
+    return { rows: variableRows(title, parentImages, description, '', categories, optionName, variants), title };
+  }
+
+  // ── Taj Class (Shopify — var meta + JSON-LD ProductGroup) ──────
+  async function scrapeTajclass(ctx) {
+    const html = ctx.mainHtml;
+
+    // 1. Parse var meta for basic product data
+    const metaMatch = html.match(/var\s+meta\s*=\s*(\{[\s\S]*?\});\s*\n/);
+    if (!metaMatch) throw new Error('var meta not found');
+    const meta = JSON.parse(metaMatch[1]);
+    const product = meta.product;
+    if (!product) throw new Error('Product not found in var meta');
+
+    // 2. Parse all ld+json blocks
+    const blocks = ldBlocks(html);
+    let ldProductGroup = null, ldProduct = null;
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'ProductGroup') ldProductGroup = j;
+        else if (j['@type'] === 'Product') ldProduct = j;
+      } catch (e) {}
+    }
+
+    // 3. Title: from JSON-LD name or og:title
+    let title = '';
+    if (ldProductGroup) title = decodeEntities(ldProductGroup.name || '');
+    if (!title && ldProduct) title = decodeEntities(ldProduct.name || '');
+    if (!title) {
+      const ogTitleMatch = html.match(/property="og:title"\s+content="([^"]+)"/);
+      if (ogTitleMatch) title = decodeEntities(ogTitleMatch[1]);
+    }
+    if (!title) {
+      const tMatch = html.match(/<title>([^<]+)<\/title>/i);
+      if (tMatch) title = decodeEntities(tMatch[1].split('|')[0].trim());
+    }
+    if (!title) title = decodeEntities(product.vendor || '');
+
+    // 4. Extract option name from form label inside product-form__input
+    let optionName = '';
+    const optFormMatch = html.match(/<div\s+class="product-form__input[^"]*"[^>]*>[\s\S]{0,500}?<span\s+class="font-body-bolder">([^<]+)<\/span>/);
+    if (optFormMatch) optionName = optFormMatch[1].replace(/:\s*$/, '');
+    // Only set if we actually have variants with different values
+    if (product.variants && product.variants.length <= 1) optionName = '';
+
+    // 5. Parent gallery images — from the variant images in ProductGroup, then from Product image, then og:image
+    let parentImages = [];
+    if (ldProductGroup && ldProductGroup.hasVariant) {
+      const seen = new Set();
+      for (const v of ldProductGroup.hasVariant) {
+        if (v.image && !seen.has(v.image)) {
+          seen.add(v.image);
+          parentImages.push(v.image);
+          if (parentImages.length >= 4) break;
+        }
+      }
+    }
+    if (!parentImages.length && ldProduct && ldProduct.image) {
+      parentImages.push(ldProduct.image);
+    }
+    if (!parentImages.length) {
+      const ogImgMatch = html.match(/property="og:image"\s+content="([^"]+)"/);
+      if (ogImgMatch) parentImages.push(ogImgMatch[1]);
+    }
+    // Clean URLs: remove &width= query param
+    parentImages = parentImages.map(url => url.replace(/&width=\d+/g, ''));
+
+    // 6. Description from meta description
+    let description = '';
+    const descMatch = html.match(/name="description"\s+content="([^"]+)"/);
+    if (descMatch) description = decodeEntities(descMatch[1]);
+
+    // 7. Categories from BreadcrumbList JSON-LD or HTML breadcrumb nav
+    let categories = '';
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'BreadcrumbList' && j.itemListElement) {
+          categories = j.itemListElement
+            .map(i => i.name || (i.item && i.item.name) || '')
+            .filter(c => c && !/^home$/i.test(c))
+            .join(' > ');
+          break;
+        }
+      } catch (e) {}
+    }
+    // Fallback: HTML breadcrumb nav
+    if (!categories) {
+      const bcLinkRe = /<nav[^>]*breadcrumb[^>]*>([\s\S]*?)<\/nav>/i;
+      const bcMatch = html.match(bcLinkRe);
+      if (bcMatch) {
+        const links = [...bcMatch[1].matchAll(/<a[^>]*>([^<]+)<\/a>/g)].map(m => decodeEntities(m[1]).trim());
+        categories = links.filter(c => !/^home$/i.test(c)).join(' > ');
+      }
+    }
+
+    // 8. Variable product: has ProductGroup with variants → variableRows
+    //    Simple product: only has Product JSON-LD or var meta → simpleRow
+    if (ldProductGroup && ldProductGroup.hasVariant && ldProductGroup.hasVariant.length > 1) {
+      // Variable product
+      const variants = ldProductGroup.hasVariant.map(v => {
+        const parts = (v.name || '').split(' - ');
+        const val = parts.length > 1 ? parts[parts.length - 1] : '';
+        return {
+          name: val,
+          sku: v.sku || '',
+          regularPrice: v.offers && v.offers.price ? parseFloat(v.offers.price).toFixed(2) : '',
+          salePrice: '',
+          images: v.image ? [v.image] : [],
+          extras: [],
+          colorCode: '',
+        };
+      });
+      return { rows: variableRows(title, parentImages, description, '', categories, optionName, variants), title };
+    }
+
+    // Simple product
+    const convertPrice = (cents) => {
+      const num = parseFloat(cents);
+      return isNaN(num) ? '' : (num / 100).toFixed(2);
+    };
+    const mv = product.variants ? product.variants[0] : null;
+    const sku = (ldProduct && ldProduct.sku) || (mv ? mv.sku : '') || '';
+    let price = '';
+    if (ldProduct && ldProduct.offers && ldProduct.offers.price) {
+      price = parseFloat(ldProduct.offers.price).toFixed(2);
+    } else if (mv) {
+      price = convertPrice(mv.price);
+    }
+    return {
+      rows: simpleRow({ sku, name: title, description, categories, images: parentImages, price }),
+      title
+    };
   }
 
   // ── Dispatch ─────────────────────────────────────────────────────────────
@@ -3877,6 +4030,7 @@
     filorga: { variable: scrapeFilorgaSimple, simple: scrapeFilorgaSimple },
     creme21: { variable: scrapeCreme21Simple, simple: scrapeCreme21Simple },
     cantubeauty: { variable: scrapeCantubeautySimple, simple: scrapeCantubeautySimple },
+    tajclass: { variable: scrapeTajclass, simple: scrapeTajclass },
   };
 
   // Detect site from a URL hostname.
@@ -3916,6 +4070,7 @@
         'al-dawaa.com': 'creme21',
         'macadamiahair.com': 'macadamiahair',
         'cantubeauty.com': 'cantubeauty',
+        'tajclass.com': 'tajclass',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -3982,6 +4137,7 @@
     { name: 'Creme 21', domain: 'al-dawaa.com', key: 'creme21', example: 'https://www.al-dawaa.com/en/p/209943/creame-21-body-lotion-ultra-dry-skin-almond-oil-600-ml' },
     { name: 'Macadamia Hair', domain: 'macadamiahair.com', key: 'macadamiahair', example: 'https://www.macadamiahair.com/products/healing-oil-spray' },
     { name: 'Cantu Shea Beauty', domain: 'cantubeauty.com', key: 'cantubeauty', example: 'https://www.cantubeauty.com/products/curls-coils-waves/coconut-curling-cream/' },
+    { name: 'Taj Class', domain: 'tajclass.com', key: 'tajclass', example: 'https://tajclass.com/products/essence-what-a-tint-lip-cheek-tint-4-9ml' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key] }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
