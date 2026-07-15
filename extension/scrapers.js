@@ -3132,14 +3132,15 @@
     // No price (catalog page)
     const price = '';
 
-    // Images: from Product.image (array of strings) + ImageObject.image fields
+    // Images: prefer ImageObject images (full-size) over Product.image (often cropped)
     let images = [];
+    images.push(...imgObjects);
     if (product && product.image) {
       const pImgs = Array.isArray(product.image) ? product.image : [product.image];
-      images = pImgs.filter(Boolean);
+      images.push(...pImgs.filter(Boolean));
     }
-    images = [...images, ...imgObjects];
-    images = [...new Set(images)].slice(0, 4);
+    // Strip query parameters (crop, size, hash) and deduplicate
+    images = [...new Set(images.map(u => u.split('?')[0]))].slice(0, 10);
 
     // Categories: from <title> tag "Product | Category | Brand"
     let categories = '';
