@@ -2925,37 +2925,52 @@
       } catch (e) {}
     }
 
-    // Images: from elementor-widget-image in product content area
-    // Use DOMParser to extract absolute URLs from srcsets
+    // Images: from elementor-widget-image, filtered to this product only
     let images = [];
+    // Derive product identifiers from title: "Basic Care – Condicionador" → ["Basic-Care", "Condicionador"]
+    const titleParts = title.split(/[–\-]/).map(p => p.trim().replace(/\s+/g, '-')).filter(p => p.length > 2);
+    const primarySlug = titleParts[0] || '';
+    const secondarySlug = titleParts[1] || '';
+
     const doc = new DOMParser().parseFromString(html, 'text/html');
-    // Find all images in the main product section — look for img inside elementor-widget-image
     const widgetImgs = doc.querySelectorAll('.elementor-widget-image img[srcset]');
+    const slugRe = primarySlug ? new RegExp(primarySlug.replace(/[-]/g, '[-]'), 'i') : null;
+    const secRe = secondarySlug ? new RegExp(secondarySlug.replace(/[-]/g, '[-]'), 'i') : null;
+
     for (const img of widgetImgs) {
       const srcset = img.getAttribute('srcset') || '';
-      // Extract the largest image URL (last in srcset, highest resolution)
-      const candidates = [...srcset.matchAll(/(https:\/\/www\.sarahk\.com\.br\/wp-content\/uploads\/[^\s]+?\.(?:png|jpg|jpeg|webp))\s+\d+w/g)];
-      if (candidates.length) {
-        const largest = candidates[candidates.length - 1][1];
-        images.push(largest);
-      } else {
-        // Fallback to src
-        const src = img.getAttribute('src');
-        if (src) {
-          try { images.push(new URL(src, ctx.url).href); } catch (e) {}
-        }
+      // First entry in the srcset is the full-size original image
+      const firstUrl = (srcset.split(',')[0] || '').trim().split(' ')[0];
+      if (!firstUrl || !firstUrl.includes('wp-content/uploads')) continue;
+      // Skip logos
+      if (/logo/i.test(firstUrl)) continue;
+      // Filter to images matching the product primary slug
+      if (slugRe && !slugRe.test(firstUrl)) continue;
+      // Further filter: if a secondary slug is known, the image must also contain it
+      // (prevents picking up related products that share the same line name, e.g. Basic-Care-Shampoo)
+      if (secRe && !secRe.test(firstUrl)) continue;
+      images.push(firstUrl);
+    }
+
+    // If filtering was too strict, fall back to slug‑only match
+    if (!images.length && slugRe) {
+      for (const img of widgetImgs) {
+        const srcset = img.getAttribute('srcset') || '';
+        const firstUrl = (srcset.split(',')[0] || '').trim().split(' ')[0];
+        if (!firstUrl || !firstUrl.includes('wp-content/uploads')) continue;
+        if (/logo/i.test(firstUrl)) continue;
+        if (slugRe.test(firstUrl)) images.push(firstUrl);
       }
     }
+
     // Fallback: og:image
     if (!images.length) {
       const ogImg = (html.match(/property="og:image:secure_url"\s+content="([^"]+)"/) || [])[1] || (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1];
       if (ogImg) images = [ogImg];
     }
-    // Filter out logos and non-product images, remove dimension suffix
-    images = images
-      .filter(url => !/logo/i.test(url) && !/favicon/i.test(url))
-      .map(url => url.replace(/-\d+x\d+(?=\.(?:png|jpg|jpeg|webp)$)/i, ''));
-    images = [...new Set(images)].slice(0, 4);
+
+    // Deduplicate (strip WordPress size suffixes e.g. -300x300)
+    images = [...new Set(images.map(u => u.replace(/-\d+x\d+(?=\.(?:png|jpg|jpeg|webp)$)/i, '')))].slice(0, 10);
 
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
