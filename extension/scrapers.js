@@ -3906,27 +3906,44 @@
     // Only set if we actually have variants with different values
     if (product.variants && product.variants.length <= 1) optionName = '';
 
-    // 5. Parent gallery images — from the variant images in ProductGroup, then from Product image, then og:image
+    // 5. Parent gallery images — first from product__media-item data-src (gallery),
+    //    then from ProductGroup variant images, then Product image, then og:image
     let parentImages = [];
-    if (ldProductGroup && ldProductGroup.hasVariant) {
-      const seen = new Set();
+    // Extract gallery images from product__media-item data-src attributes
+    const mediaRe = /product__media-item[^>]*data-media-id="(\d+)"[^>]*data-media-type="(image|video)"[^>]*data-src="([^"]+)"/g;
+    const seenMedia = new Set();
+    let mm;
+    while ((mm = mediaRe.exec(html))) {
+      if (mm[2] === 'image' && !seenMedia.has(mm[1])) {
+        seenMedia.add(mm[1]);
+        const url = mm[3].replace(/&amp;/g, '&').replace(/&width=\d+/g, '');
+        parentImages.push(url.startsWith('//') ? 'https:' + url : url);
+      }
+      if (parentImages.length >= 4) break;
+    }
+    // Supplement with ProductGroup variant images (for variable products)
+    if (parentImages.length < 4 && ldProductGroup && ldProductGroup.hasVariant) {
+      const seen = new Set(parentImages.map(u => u.split('?')[0]));
       for (const v of ldProductGroup.hasVariant) {
-        if (v.image && !seen.has(v.image)) {
-          seen.add(v.image);
-          parentImages.push(v.image);
-          if (parentImages.length >= 4) break;
+        if (v.image && !seen.has(v.image.split('?')[0])) {
+          seen.add(v.image.split('?')[0]);
+          parentImages.push(v.image.replace(/&width=\d+/g, ''));
         }
+        if (parentImages.length >= 4) break;
       }
     }
+    // Fallback: Product JSON-LD image
     if (!parentImages.length && ldProduct && ldProduct.image) {
-      parentImages.push(ldProduct.image);
+      parentImages.push(ldProduct.image.replace(/&width=\d+/g, ''));
     }
+    // Fallback: og:image
     if (!parentImages.length) {
       const ogImgMatch = html.match(/property="og:image"\s+content="([^"]+)"/);
       if (ogImgMatch) parentImages.push(ogImgMatch[1]);
     }
-    // Clean URLs: remove &width= query param
-    parentImages = parentImages.map(url => url.replace(/&width=\d+/g, ''));
+    // Clean URLs: remove width/crop params
+    parentImages = parentImages.map(url => url.replace(/&width=\d+/g, '').split('?')[0]);
+    parentImages = [...new Set(parentImages)].slice(0, 4);
 
     // 6. Description from meta description
     let description = '';
