@@ -3945,10 +3945,15 @@
     parentImages = parentImages.map(url => url.replace(/&width=\d+/g, '').split('?')[0]);
     parentImages = [...new Set(parentImages)].slice(0, 4);
 
-    // 6. Description from meta description
+    // 6. Description: prefer JSON-LD (full) over meta description (often truncated)
     let description = '';
-    const descMatch = html.match(/name="description"\s+content="([^"]+)"/);
-    if (descMatch) description = decodeEntities(descMatch[1]);
+    if (ldProductGroup) description = decodeEntities(ldProductGroup.description || '');
+    if (!description && ldProduct) description = decodeEntities(ldProduct.description || '');
+    if (!description) {
+      const descMatch = html.match(/name="description"\s+content="([^"]+)"/);
+      if (descMatch) description = decodeEntities(descMatch[1]);
+    }
+    description = description.trim();
 
     // 7. Categories from BreadcrumbList JSON-LD or HTML breadcrumb nav
     let categories = '';
