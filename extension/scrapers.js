@@ -3140,7 +3140,7 @@
       images.push(...pImgs.filter(Boolean));
     }
     // Strip query parameters (crop, size, hash) and deduplicate
-    images = [...new Set(images.map(u => u.split('?')[0]))].slice(0, 10);
+    images = [...new Set(images.map(u => u.split('?')[0]))].slice(0, 4);
 
     // Categories: from <title> tag "Product | Category | Brand"
     let categories = '';
