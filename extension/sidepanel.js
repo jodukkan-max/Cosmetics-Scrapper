@@ -186,6 +186,10 @@ async function runScrape(req) {
     const res = await chrome.runtime.sendMessage(Object.assign({ type: 'scrape' }, req));
     if (!res || !res.ok) throw new Error((res && res.error) || 'Scrape failed');
     currentRows = res.rows || [];
+    // Auto-detect product type: rows with a Type field are variable, otherwise simple
+    if (currentRows.length > 0) {
+      setType(currentRows[0].hasOwnProperty('Type') ? 'variable' : 'simple');
+    }
     const brand = brandFromUrl(req.url || '');
     currentRows.forEach(r => { r.tags = brand; r['Product URL'] = req.url || ''; r.Categories = r.Categories || ''; });
     $('status').classList.add('hidden');

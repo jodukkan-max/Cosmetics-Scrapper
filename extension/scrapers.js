@@ -1671,36 +1671,32 @@
     } catch (e) {}
 
     // ── Variants from select options ──
-    // MakeOver products use the SAME main product image for all variants.
-    // The kuang div images are used only as swatches (colorCode), not variant images.
+    // Each variant's product image is fetched via AJAX from yspic.asp?id=<var_id>.
+    // The kuang div and imgid div contain swatch images (not used — color codes are manual).
     const optRe = /<option[^>]*value="(\d+)"[^>]*>([^<]+)<\/option>/g;
-    const kuangImages = new Set();
     const variants = [];
     let opt;
     while ((opt = optRe.exec(html))) {
       const optId = opt[1];
       const optName = decodeEntities(opt[2].trim());
 
-      // Find the kuang div for this variant (used as the image swatch)
-      const kuangRe = new RegExp(`id="kuang${optId}"[\\s\\S]*?<img[^>]*src="([^"]+)"`, '');
-      const kuangImgMatch = html.match(kuangRe);
-      let swatchImg = kuangImgMatch ? makeoverAbsUrl(kuangImgMatch[1], pageUrl) : '';
-
-      // Fallback: use imgid background-image (the small clickable swatch)
-      if (!swatchImg) {
-        const bgRe = new RegExp(`id="imgid${optId}"[^>]*background-image:url\\(([^)]+)\\)`);
-        const bgMatch = html.match(bgRe);
-        swatchImg = bgMatch ? makeoverAbsUrl(bgMatch[1], pageUrl) : '';
-      }
-
-      if (swatchImg) kuangImages.add(swatchImg);
+      // Fetch variant image from yspic.asp
+      let varImg = '';
+      try {
+        const pageBase = pageUrl.replace(/\/[^\/]*$/, '/');
+        const yspicUrl = pageBase + 'yspic.asp?id=' + optId;
+        const filename = await ctx.fetchText(yspicUrl, { method: 'POST' });
+        if (filename && filename.trim()) {
+          varImg = pageBase + 'uploadfile/' + filename.trim();
+        }
+      } catch (e) { /* variant image fetch failed, leave empty */ }
 
       variants.push({
         name: optName,
         sku: '',
         regularPrice: '',
         salePrice: '',
-        images: [],  // filled below with the main product image
+        images: varImg ? [varImg] : [],
         extras: [],
         colorCode: '',  // user fills color codes manually
       });
@@ -1708,15 +1704,10 @@
 
     if (!variants.length) throw new Error('No variants found');
 
-    // ── Product image — the mainpic is the only image, shared by all variants ──
+    // ── Parent gallery image — the mainpic ──
     let mainpic = (html.match(/id="mainpic"[^>]*src="([^"]+)"/) || [])[1] || '';
     mainpic = makeoverAbsUrl(mainpic, pageUrl);
     const parentImages = mainpic ? [mainpic] : [];
-
-    // All variants share the same main product image
-    for (const v of variants) {
-      if (mainpic) v.images = [mainpic];
-    }
 
     // ── Description ──
     let description = '';
@@ -3856,15 +3847,15 @@
         salePrice: '',
         images: parentImages.length ? [parentImages[0]] : [],
         extras: [],
-        colorCode: swatchUrl,
+        colorCode: '',  // user fills color codes manually
       };
     });
 
     return { rows: variableRows(title, parentImages, description, '', categories, optionName, variants), title };
   }
 
-  // ── Taj Class (Shopify — var meta + JSON-LD ProductGroup) ──────
-  async function scrapeTajclass(ctx) {
+  // ── Taj Class (Shopify simple product — var meta + JSON-LD Product) ──
+  async function scrapeTajclassSimple(ctx) {
     const html = ctx.mainHtml;
 
     // 1. Parse var meta for basic product data
@@ -3874,148 +3865,83 @@
     const product = meta.product;
     if (!product) throw new Error('Product not found in var meta');
 
-    // 2. Parse all ld+json blocks
+    // 2. Parse all ld+json blocks for Product
     const blocks = ldBlocks(html);
-    let ldProductGroup = null, ldProduct = null;
+    let ldProduct = null;
     for (const raw of blocks) {
       try {
         const j = JSON.parse(raw);
-        if (j['@type'] === 'ProductGroup') ldProductGroup = j;
-        else if (j['@type'] === 'Product') ldProduct = j;
+        if (j['@type'] === 'Product') { ldProduct = j; break; }
       } catch (e) {}
     }
 
-    // 3. Title: from JSON-LD name or og:title
-    let title = '';
-    if (ldProductGroup) title = decodeEntities(ldProductGroup.name || '');
-    if (!title && ldProduct) title = decodeEntities(ldProduct.name || '');
-    if (!title) {
-      const ogTitleMatch = html.match(/property="og:title"\s+content="([^"]+)"/);
-      if (ogTitleMatch) title = decodeEntities(ogTitleMatch[1]);
+    // 3. Title: from JSON-LD Product name, og:title, or <title>
+    let name = ldProduct ? decodeEntities(ldProduct.name || '') : '';
+    if (!name) {
+      const ogTitle = (html.match(/property="og:title"\s+content="([^"]+)"/) || [])[1];
+      if (ogTitle) name = decodeEntities(ogTitle.trim());
     }
-    if (!title) {
+    if (!name) {
       const tMatch = html.match(/<title>([^<]+)<\/title>/i);
-      if (tMatch) title = decodeEntities(tMatch[1].split('|')[0].trim());
+      if (tMatch) name = decodeEntities(tMatch[1].split('|')[0].replace(/\s*–\s*Taj Class\s*$/i, '').trim());
     }
-    if (!title) title = decodeEntities(product.vendor || '');
+    if (!name) name = decodeEntities(product.vendor || 'Taj Class Product');
 
-    // 4. Extract option name from form label inside product-form__input
-    let optionName = '';
-    const optFormMatch = html.match(/<div\s+class="product-form__input[^"]*"[^>]*>[\s\S]{0,500}?<span\s+class="font-body-bolder">([^<]+)<\/span>/);
-    if (optFormMatch) optionName = optFormMatch[1].replace(/:\s*$/, '');
-    // Only set if we actually have variants with different values
-    if (product.variants && product.variants.length <= 1) optionName = '';
+    // 4. SKU: from JSON-LD or var meta
+    const sku = (ldProduct && ldProduct.sku) || (product.variants && product.variants[0] ? product.variants[0].sku : '') || '';
 
-    // 5. Parent gallery images — first from product__media-item data-src (gallery),
-    //    then from ProductGroup variant images, then Product image, then og:image
-    let parentImages = [];
-    // Extract gallery images from product__media-item data-src attributes
-    const mediaRe = /product__media-item[^>]*data-media-id="(\d+)"[^>]*data-media-type="(image|video)"[^>]*data-src="([^"]+)"/g;
-    const seenMedia = new Set();
-    let mm;
-    while ((mm = mediaRe.exec(html))) {
-      if (mm[2] === 'image' && !seenMedia.has(mm[1])) {
-        seenMedia.add(mm[1]);
-        const url = mm[3].replace(/&amp;/g, '&').replace(/&width=\d+/g, '');
-        parentImages.push(url.startsWith('//') ? 'https:' + url : url);
-      }
-      if (parentImages.length >= 4) break;
+    // 5. Price: from JSON-LD offers or var meta (cents→decimal)
+    const convertPrice = (cents) => {
+      const num = parseFloat(cents);
+      return isNaN(num) ? '' : (num / 100).toFixed(2);
+    };
+    let price = '';
+    if (ldProduct && ldProduct.offers && ldProduct.offers.price) {
+      price = parseFloat(ldProduct.offers.price).toFixed(2);
+    } else if (product.variants && product.variants[0]) {
+      price = convertPrice(product.variants[0].price);
     }
-    // Supplement with ProductGroup variant images (for variable products)
-    if (parentImages.length < 4 && ldProductGroup && ldProductGroup.hasVariant) {
-      const seen = new Set(parentImages.map(u => u.split('?')[0]));
-      for (const v of ldProductGroup.hasVariant) {
-        if (v.image && !seen.has(v.image.split('?')[0])) {
-          seen.add(v.image.split('?')[0]);
-          parentImages.push(v.image.replace(/&width=\d+/g, ''));
-        }
-        if (parentImages.length >= 4) break;
-      }
-    }
-    // Fallback: Product JSON-LD image
-    if (!parentImages.length && ldProduct && ldProduct.image) {
-      parentImages.push(ldProduct.image.replace(/&width=\d+/g, ''));
-    }
-    // Fallback: og:image
-    if (!parentImages.length) {
-      const ogImgMatch = html.match(/property="og:image"\s+content="([^"]+)"/);
-      if (ogImgMatch) parentImages.push(ogImgMatch[1]);
-    }
-    // Clean URLs: remove width/crop params
-    parentImages = parentImages.map(url => url.replace(/&width=\d+/g, '').split('?')[0]);
-    parentImages = [...new Set(parentImages)].slice(0, 4);
 
-    // 6. Description: prefer JSON-LD (full) over meta description (often truncated)
+    // 6. Description: prefer JSON-LD (full) over meta description
     let description = '';
-    if (ldProductGroup) description = decodeEntities(ldProductGroup.description || '');
-    if (!description && ldProduct) description = decodeEntities(ldProduct.description || '');
+    if (ldProduct) description = decodeEntities(ldProduct.description || '');
     if (!description) {
       const descMatch = html.match(/name="description"\s+content="([^"]+)"/);
       if (descMatch) description = decodeEntities(descMatch[1]);
     }
     description = description.trim();
 
-    // 7. Categories from BreadcrumbList JSON-LD or HTML breadcrumb nav
+    // 7. Categories from HTML breadcrumb nav (skip Home and the product itself)
     let categories = '';
-    for (const raw of blocks) {
-      try {
-        const j = JSON.parse(raw);
-        if (j['@type'] === 'BreadcrumbList' && j.itemListElement) {
-          categories = j.itemListElement
-            .map(i => i.name || (i.item && i.item.name) || '')
-            .filter(c => c && !/^home$/i.test(c))
-            .join(' > ');
-          break;
-        }
-      } catch (e) {}
+    const bcBlock = html.match(/<nav[^>]*class="[^"]*breadcrumbs[^"]*"[^>]*>([\s\S]*?)<\/nav>/);
+    if (bcBlock) {
+      const links = [...bcBlock[1].matchAll(/<a[^>]*>([^<]+)<\/a>/g)].map(m => decodeEntities(m[1]).trim());
+      categories = links.filter(c => !/^home$/i.test(c)).join(', ');
     }
-    // Fallback: HTML breadcrumb nav
-    if (!categories) {
-      const bcLinkRe = /<nav[^>]*breadcrumb[^>]*>([\s\S]*?)<\/nav>/i;
-      const bcMatch = html.match(bcLinkRe);
-      if (bcMatch) {
-        const links = [...bcMatch[1].matchAll(/<a[^>]*>([^<]+)<\/a>/g)].map(m => decodeEntities(m[1]).trim());
-        categories = links.filter(c => !/^home$/i.test(c)).join(' > ');
+
+    // 8. Gallery images from product__media-item data-src (up to 4)
+    let images = [];
+    const mediaRe = /product__media-item[^>]*data-media-id="(\d+)"[^>]*data-media-type="image"[^>]*data-src="([^"]+)"/g;
+    const seenMedia = new Set();
+    let mm;
+    while ((mm = mediaRe.exec(html))) {
+      if (!seenMedia.has(mm[1])) {
+        seenMedia.add(mm[1]);
+        const url = mm[2].replace(/&amp;/g, '&').replace(/&width=\d+/g, '');
+        images.push(url.startsWith('//') ? 'https:' + url : url);
       }
+      if (images.length >= 4) break;
+    }
+    // Fallback: JSON-LD image or og:image
+    if (!images.length && ldProduct && ldProduct.image) {
+      images.push(ldProduct.image.replace(/&width=\d+/g, ''));
+    }
+    if (!images.length) {
+      const ogImg = (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1];
+      if (ogImg) images.push(ogImg);
     }
 
-    // 8. Variable product: has ProductGroup with variants → variableRows
-    //    Simple product: only has Product JSON-LD or var meta → simpleRow
-    if (ldProductGroup && ldProductGroup.hasVariant && ldProductGroup.hasVariant.length > 1) {
-      // Variable product
-      const variants = ldProductGroup.hasVariant.map(v => {
-        const parts = (v.name || '').split(' - ');
-        const val = parts.length > 1 ? parts[parts.length - 1] : '';
-        return {
-          name: val,
-          sku: v.sku || '',
-          regularPrice: v.offers && v.offers.price ? parseFloat(v.offers.price).toFixed(2) : '',
-          salePrice: '',
-          images: v.image ? [v.image] : [],
-          extras: [],
-          colorCode: '',
-        };
-      });
-      return { rows: variableRows(title, parentImages, description, '', categories, optionName, variants), title };
-    }
-
-    // Simple product
-    const convertPrice = (cents) => {
-      const num = parseFloat(cents);
-      return isNaN(num) ? '' : (num / 100).toFixed(2);
-    };
-    const mv = product.variants ? product.variants[0] : null;
-    const sku = (ldProduct && ldProduct.sku) || (mv ? mv.sku : '') || '';
-    let price = '';
-    if (ldProduct && ldProduct.offers && ldProduct.offers.price) {
-      price = parseFloat(ldProduct.offers.price).toFixed(2);
-    } else if (mv) {
-      price = convertPrice(mv.price);
-    }
-    return {
-      rows: simpleRow({ sku, name: title, description, categories, images: parentImages, price }),
-      title
-    };
+    return { rows: simpleRow({ sku, name, description, categories, images, price }), title: name };
   }
 
   // ── Dispatch ─────────────────────────────────────────────────────────────
@@ -4068,7 +3994,7 @@
     filorga: { variable: scrapeFilorgaSimple, simple: scrapeFilorgaSimple },
     creme21: { variable: scrapeCreme21Simple, simple: scrapeCreme21Simple },
     cantubeauty: { variable: scrapeCantubeautySimple, simple: scrapeCantubeautySimple },
-    tajclass: { variable: scrapeTajclass, simple: scrapeTajclass },
+    tajclass: { simple: scrapeTajclassSimple },
   };
 
   // Detect site from a URL hostname.
@@ -4120,7 +4046,7 @@
     const type = ctx.productType === 'simple' ? 'simple' : 'variable';
     const entry = SCRAPERS[site];
     if (!entry) throw new Error('No scraper for site: ' + (site || '(unknown)'));
-    const fn = entry[type] || entry.variable;
+    const fn = entry[type] || entry.variable || entry.simple;
     return await fn(ctx);
   }
 
@@ -4175,7 +4101,7 @@
     { name: 'Creme 21', domain: 'al-dawaa.com', key: 'creme21', example: 'https://www.al-dawaa.com/en/p/209943/creame-21-body-lotion-ultra-dry-skin-almond-oil-600-ml' },
     { name: 'Macadamia Hair', domain: 'macadamiahair.com', key: 'macadamiahair', example: 'https://www.macadamiahair.com/products/healing-oil-spray' },
     { name: 'Cantu Shea Beauty', domain: 'cantubeauty.com', key: 'cantubeauty', example: 'https://www.cantubeauty.com/products/curls-coils-waves/coconut-curling-cream/' },
-    { name: 'Taj Class', domain: 'tajclass.com', key: 'tajclass', example: 'https://tajclass.com/products/essence-what-a-tint-lip-cheek-tint-4-9ml' },
+    { name: 'Taj Class', domain: 'tajclass.com', key: 'tajclass', example: 'https://tajclass.com/products/mascara-i-love-extreme-crazy-volume-essence' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key] }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
