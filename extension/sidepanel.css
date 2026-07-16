@@ -74,7 +74,12 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sy
 #data-table th, #data-table td { border: 1px solid var(--border); padding: 5px 7px; text-align: left; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 #data-table th { background: var(--surface2); position: sticky; top: 0; }
 #data-table img { height: 34px; border-radius: 4px; vertical-align: middle; }
-.swatch-dot { display: inline-block; width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--border); vertical-align: middle; }
+.swatch-dot { display: inline-block; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--border); vertical-align: middle; margin-right: 5px; }
+.swatch-dot + .color-code-input { width: 85px; padding: 2px 4px; font-size: 0.8em; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); }
+.color-code-cell { white-space: nowrap; line-height: 22px; }
+.color-code-cell img { width: 24px; height: 24px; object-fit: cover; border-radius: 4px; vertical-align: middle; margin-right: 4px; }
+.color-code-input { width: 85px; padding: 2px 4px; font-size: 0.8em; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); }
+.color-code-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 
 /* ── Bulk tab count badge ─────────────────────────── */
 .bulk-tab-count { font-size: 10px; font-weight: 400; opacity: 0.7; }

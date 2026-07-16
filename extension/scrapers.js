@@ -1423,7 +1423,9 @@
 
     const nextData = isadoraNextData(html);
     if (nextData) {
-      const parentSlug = nextData.fullSlug.substring(0, nextData.fullSlug.lastIndexOf('/'));
+      // Derive parent slug from URL (not from __NEXT_DATA__ full_slug which can be stale after SPA navigation)
+      const urlPath = new URL(url).pathname.replace(/\/+$/, '').replace(/^\//, '');
+      const parentSlug = urlPath.substring(0, urlPath.lastIndexOf('/'));
       const parentSegments = parentSlug.split('/').length;
 
       // Filter slugData for direct variant children of this product
@@ -1441,17 +1443,15 @@
             const varNext = isadoraNextData(pageHtml);
             const images = isadoraCarouselImages(pageHtml);
 
-            let sku = '', colorCode = '';
+            let sku = '';
             if (varNext && varNext.data) {
               sku = varNext.data.ean || '';
-              const hex = varNext.data.color_hex_code || '';
-              const swatchImg = (varNext.data.swatch_image && varNext.data.swatch_image[0] && varNext.data.swatch_image[0].url) || '';
-              colorCode = swatchImg ? ISADORA_DAM_BASE + swatchImg.split('?')[0] : hex ? '#' + hex : '';
             }
+            // colorCode stays empty — user fills it manually
 
             variants.push({
               name: v.name, sku, regularPrice: '', salePrice: '',
-              images, extras: [], colorCode,
+              images, extras: [], colorCode: '',
             });
           } catch (e) {
             // Push entry with name only (no images/EAN) so the variant is still listed
@@ -1504,7 +1504,7 @@
     // ── 9. Build WooCommerce rows via the shared helper ────────────────────────
     const title = baseName || 'IsaDora Product';
     return {
-      rows: variableRows(title, parentImages, description, shortDesc, categories, 'Image', variants),
+      rows: variableRows(title, parentImages, description, shortDesc, categories, 'Color', variants),
       title,
     };
   }
@@ -1702,7 +1702,7 @@
         salePrice: '',
         images: [],  // filled below with the main product image
         extras: [],
-        colorCode: swatchImg,  // image swatch from kuang div
+        colorCode: '',  // user fills color codes manually
       });
     }
 
@@ -1727,7 +1727,7 @@
     }
 
     return {
-      rows: variableRows(name, parentImages, description, '', categories, 'Image', variants),
+      rows: variableRows(name, parentImages, description, '', categories, 'Color', variants),
       title: name,
     };
   }

@@ -10,6 +10,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg.type === 'scrape') sendResponse(await handleScrape(msg));
       else if (msg.type === 'wcTest') sendResponse(await wcTest(msg));
       else if (msg.type === 'wcImport') sendResponse(await wcImport(msg));
+      else if (msg.type === 'fetchSwatchDataUrl') sendResponse({ dataUrl: await fetchSwatchAsDataUrl(msg.swatchUrl) });
       else if (msg.type === 'bulkDiscover') handleBulkDiscover(msg, sendResponse);
       else sendResponse({ ok: false, error: 'Unknown message' });
     } catch (e) {
@@ -42,6 +43,20 @@ async function handleScrape({ mode, productType, url, tabId }) {
   } catch (e) {
     return { ok: false, error: e.message };
   }
+}
+
+// ── Swatch image relay — downloads CORS-free in SW, returns base64 data URL ──
+async function fetchSwatchAsDataUrl(swatchUrl) {
+  try {
+    const resp = await fetch(swatchUrl);
+    if (!resp.ok) return '';
+    const buf = await resp.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const mime = resp.headers.get('content-type') || 'image/jpeg';
+    return 'data:' + mime + ';base64,' + btoa(binary);
+  } catch (e) { return ''; }
 }
 
 function mkFetchText() {

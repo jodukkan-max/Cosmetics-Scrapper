@@ -296,8 +296,10 @@ function renderResults(title) {
       }
       if (col === 'Color Code' && row.Type === 'variation') {
         const cc = row['Color Code'] || '';
-        if (cc.startsWith('#')) return `<td><span class="swatch-dot" style="background:${escHtml(cc)}"></span> ${escHtml(cc)}</td>`;
-        if (cc.startsWith('http')) return `<td><img src="${escHtml(cc)}" onerror="this.style.display='none'"></td>`;
+        const rowId = row.ID;
+        if (cc.startsWith('#')) return `<td class="color-code-cell"><span class="swatch-dot" style="background:${escHtml(cc)}"></span> <input class="color-code-input" value="${escHtml(cc)}" data-rowid="${rowId}"></td>`;
+        if (cc.startsWith('http')) return `<td class="color-code-cell"><img src="${escHtml(cc)}" onerror="this.style.display='none'"> <input class="color-code-input" value="${escHtml(cc)}" data-rowid="${rowId}"></td>`;
+        return `<td class="color-code-cell"><input class="color-code-input" value="${escHtml(cc)}" data-rowid="${rowId}" placeholder="#RRGGBB"></td>`;
       }
       // Categories: multi-select dropdown for parent/simple rows, empty for variations
       if (col === 'Categories') {
@@ -311,6 +313,8 @@ function renderResults(title) {
         return `<td class="cat-select-cell"><select multiple class="cat-multisel" data-rowid="${escHtml(String(row.ID))}">${optionsHtml}</select></td>`;
       }
       const val = cellValue(col, row);
+      if (col === 'Rey Swatches' && row.Type === 'variable')
+        return `<td data-col="Rey Swatches" data-rowid="${escHtml(String(row.ID))}" title="${escHtml(val)}">${escHtml(val.length > 80 ? val.slice(0, 80) + '…' : val)}</td>`;
       return `<td title="${escHtml(val)}">${escHtml(val.length > 80 ? val.slice(0, 80) + '…' : val)}</td>`;
     }).join('');
     return `<tr data-rowid="${escHtml(String(row.ID))}"${isVar ? ' class="var-row"' : ''}>${selCell}${cells}</tr>`;
@@ -324,6 +328,32 @@ function renderResults(title) {
       if (!row) return;
       const vals = [...sel.selectedOptions].map(o => o.value);
       row['Categories'] = vals.join(', ');
+    });
+  });
+
+  // Color Code input change handlers
+  $('tbody').querySelectorAll('.color-code-input').forEach(inp => {
+    inp.addEventListener('input', () => {
+      const rowId = Number(inp.dataset.rowid);
+      const row = currentRows.find(r => Number(r.ID) === rowId);
+      if (row) row['Color Code'] = inp.value;
+      // Update adjacent swatch dot if present
+      const dot = inp.parentElement.querySelector('.swatch-dot');
+      if (dot && /^#[0-9A-Fa-f]{6}$/.test(inp.value)) dot.style.background = inp.value;
+      // Update Rey Swatches cell for the parent row
+      if (row && row.Parent) {
+        const parentId = row.Parent.replace(/^id:/, '');
+        const parentRow = currentRows.find(r => String(r.ID) === parentId);
+        if (parentRow) {
+          const swatchesJson = buildReySwatches(parentRow, currentRows);
+          const reyCell = document.querySelector(`td[data-col="Rey Swatches"][data-rowid="${escHtml(parentId)}"]`);
+          if (reyCell) {
+            const display = swatchesJson.length > 80 ? swatchesJson.slice(0, 80) + '…' : swatchesJson;
+            reyCell.textContent = display;
+            reyCell.title = swatchesJson;
+          }
+        }
+      }
     });
   });
 
