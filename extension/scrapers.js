@@ -3954,16 +3954,23 @@
       }
     } catch (e) {}
 
-    // 8. Gallery images from HTML product__media-item data-src (up to 4)
+    // 8. Gallery images from the Shopify images JSON array in raw HTML (up to 4)
     let images = [];
-    const mediaRe = /product__media-item[^>]*data-media-type="image"[^>]*data-src="([^"]+)"/g;
-    const seenMedia = new Set();
-    let mm;
-    while ((mm = mediaRe.exec(html))) {
-      const url = mm[1].replace(/&amp;/g, '&');
-      if (!seenMedia.has(url)) {
-        seenMedia.add(url);
-        images.push(url.startsWith('//') ? 'https:' + url : url);
+    const imagesRe = /"images":\[((?:"[^"]*",?)+)\]/g;
+    let imgBlock;
+    while ((imgBlock = imagesRe.exec(html))) {
+      const urls = [...imgBlock[1].matchAll(/"([^"]+)"/g)].map(m => {
+        const u = m[1].replace(/\\\//g, '/');
+        if (u.startsWith('//')) return 'https:' + u.split('?')[0];
+        if (u.startsWith('http')) return u.split('?')[0];
+        return '';
+      }).filter(Boolean);
+      if (urls.length < 2) continue; // skip single-image arrays (likely not product)
+      const seen = new Set();
+      for (const u of urls) {
+        if (seen.has(u)) continue;
+        seen.add(u);
+        images.push(u);
       }
       if (images.length >= 4) break;
     }
