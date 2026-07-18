@@ -3829,6 +3829,29 @@
       }
     } catch (e) {}
 
+    // 8. Build variant image map from JSON-LD ProductGroup.hasVariant
+    // ProductGroup may be at the top level or nested inside itemReviewed (e.g. Review schema)
+    const variantImages = {};
+    const ldRe = /<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi;
+    let ldMatch;
+    while ((ldMatch = ldRe.exec(html))) {
+      try {
+        const j = JSON.parse(ldMatch[1]);
+        const pg = j['@type'] === 'ProductGroup' ? j : (j.itemReviewed && j.itemReviewed['@type'] === 'ProductGroup' ? j.itemReviewed : null);
+        if (pg && pg.hasVariant) {
+          for (const hv of pg.hasVariant) {
+            if (hv.name && hv.image) {
+              // Extract color name: "PRODUCT - 11. cappuccino" -> "11. cappuccino"
+              const parts = (hv.name || '').split(' - ');
+              const colorName = parts.length > 1 ? parts[parts.length - 1] : '';
+              if (colorName) variantImages[colorName] = hv.image.split('?')[0];
+            }
+          }
+          break;
+        }
+      } catch (e) {}
+    }
+
     // 9. Build variant objects
     const convertPrice = (cents) => {
       const num = parseFloat(cents);
@@ -3845,13 +3868,115 @@
         sku: v.sku || '',
         regularPrice: convertPrice(v.price),
         salePrice: '',
-        images: parentImages.length ? [parentImages[0]] : [],
+        images: variantImages[publicTitle] ? [variantImages[publicTitle]] : (parentImages.length ? [parentImages[0]] : []),
         extras: [],
         colorCode: '',  // user fills color codes manually
       };
     });
 
     return { rows: variableRows(title, parentImages, description, '', categories, optionName, variants), title };
+  }
+
+  // ── Diego Dalla Palma simple product ──
+  async function scrapeDiegodallapalmaSimple(ctx) {
+    const html = ctx.mainHtml;
+
+    // 1. Parse var meta for basic product data
+    const metaMatch = html.match(/var\s+meta\s*=\s*(\{[\s\S]*?\});\s*\n/);
+    if (!metaMatch) throw new Error('var meta not found');
+    const meta = JSON.parse(metaMatch[1]);
+    const product = meta.product;
+    if (!product) throw new Error('Product not found in var meta');
+
+    // 2. Parse all ld+json blocks for Product (may be nested in itemReviewed)
+    const blocks = ldBlocks(html);
+    let ldProduct = null;
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        const p = j['@type'] === 'Product' ? j : (j.itemReviewed && j.itemReviewed['@type'] === 'Product' ? j.itemReviewed : null);
+        if (p && p.sku) { ldProduct = p; break; }
+      } catch (e) {}
+    }
+
+    // 3. Title: from JSON-LD Product name, og:title, or <title>
+    let name = ldProduct ? decodeEntities(ldProduct.name || '') : '';
+    if (!name) {
+      const ogTitle = (html.match(/property="og:title"\s+content="([^"]+)"/) || [])[1];
+      if (ogTitle) name = decodeEntities(ogTitle.split('|')[0].trim());
+    }
+    if (!name) {
+      const tMatch = html.match(/<title>([^<]+)<\/title>/i);
+      if (tMatch) name = decodeEntities(tMatch[1].split('|')[0].trim());
+    }
+    if (!name) name = decodeEntities(product.vendor || 'Diego Dalla Palma Product');
+
+    // 4. SKU: from JSON-LD or var meta
+    const sku = (ldProduct && ldProduct.sku) || (product.variants && product.variants[0] ? product.variants[0].sku : '') || '';
+
+    // 5. Price: from JSON-LD offers or var meta (cents→decimal)
+    const convertPrice = (cents) => {
+      const num = parseFloat(cents);
+      return isNaN(num) ? '' : (num / 100).toFixed(2);
+    };
+    let price = '';
+    if (ldProduct && ldProduct.offers && ldProduct.offers.price) {
+      price = parseFloat(ldProduct.offers.price).toFixed(2);
+    } else if (product.variants && product.variants[0]) {
+      price = convertPrice(product.variants[0].price);
+    }
+
+    // 6. Description: prefer JSON-LD (full) over meta description
+    let description = '';
+    if (ldProduct) description = decodeEntities(ldProduct.description || '');
+    if (!description) {
+      const descMatch = html.match(/name="description"\s+content="([^"]+)"/);
+      if (descMatch) description = decodeEntities(descMatch[1]);
+    }
+    description = description.replace(/\s+/g, ' ').trim();
+
+    // 7. Categories from BreadcrumbList JSON-LD
+    let categories = '';
+    try {
+      const bcRe = /<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi;
+      let bcMatch;
+      while ((bcMatch = bcRe.exec(html))) {
+        const bcText = bcMatch[1];
+        if (!bcText.includes('BreadcrumbList')) continue;
+        const bcJson = JSON.parse(bcText);
+        if (bcJson['@type'] === 'BreadcrumbList' && bcJson.itemListElement) {
+          categories = bcJson.itemListElement
+            .map(i => i.name || (i.item && i.item.name) || '')
+            .filter(c => c && !/^home$/i.test(c))
+            .join(' > ');
+          break;
+        }
+      }
+    } catch (e) {}
+
+    // 8. Gallery images from HTML product__media-item data-src (up to 4)
+    let images = [];
+    const mediaRe = /product__media-item[^>]*data-media-type="image"[^>]*data-src="([^"]+)"/g;
+    const seenMedia = new Set();
+    let mm;
+    while ((mm = mediaRe.exec(html))) {
+      const url = mm[1].replace(/&amp;/g, '&');
+      if (!seenMedia.has(url)) {
+        seenMedia.add(url);
+        images.push(url.startsWith('//') ? 'https:' + url : url);
+      }
+      if (images.length >= 4) break;
+    }
+    // Fallback: JSON-LD image or og:image
+    if (!images.length && ldProduct && ldProduct.image) {
+      images.push(ldProduct.image.replace(/&width=\d+/g, '').split('?')[0]);
+    }
+    if (!images.length) {
+      const ogImg = (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1];
+      if (ogImg) images.push(ogImg);
+    }
+
+    return { rows: simpleRow({ sku, name, description, categories, images, price }), title: name };
   }
 
   // ── Taj Class (Shopify simple product — var meta + JSON-LD Product) ──
@@ -3909,7 +4034,7 @@
       const descMatch = html.match(/name="description"\s+content="([^"]+)"/);
       if (descMatch) description = decodeEntities(descMatch[1]);
     }
-    description = description.trim();
+    description = description.replace(/\s+/g, ' ').trim();
 
     // 7. Categories from HTML breadcrumb nav (skip Home and the product itself)
     let categories = '';
@@ -3942,6 +4067,101 @@
     }
 
     return { rows: simpleRow({ sku, name, description, categories, images, price }), title: name };
+  }
+
+  // ── MakeOver Pakistan (Next.js — JSON-LD Product + shade buttons) ──
+  async function scrapeMakeoverPakistan(ctx) {
+    const html = ctx.mainHtml;
+
+    // 1. Parse JSON-LD for product data
+    const blocks = ldBlocks(html);
+    let ldProduct = null;
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { ldProduct = j; break; }
+      } catch (e) {}
+    }
+    if (!ldProduct) throw new Error('Product JSON-LD not found');
+
+    // 2. Title
+    let title = decodeEntities(ldProduct.name || '');
+    if (!title) {
+      const h1 = html.match(/<h1[^>]*>([^<]+)<\/h1>/);
+      title = h1 ? decodeEntities(h1[1].trim()) : 'Makeover Pakistan Product';
+    }
+
+    // 3. SKU
+    const sku = ldProduct.sku || '';
+
+    // 4. Price
+    let price = '';
+    if (ldProduct.offers && ldProduct.offers.price) {
+      price = parseFloat(ldProduct.offers.price).toFixed(2);
+    }
+
+    // 5. Description from JSON-LD (collapsed whitespace)
+    let description = decodeEntities(ldProduct.description || '');
+    description = description.replace(/\s+/g, ' ').trim();
+
+    // 6. Categories from BreadcrumbList JSON-LD
+    let categories = '';
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'BreadcrumbList' && j.itemListElement) {
+          categories = j.itemListElement
+            .map(i => i.name || (i.item && i.item.name) || '')
+            .filter(c => c && !/^home$/i.test(c))
+            .join(' > ');
+          break;
+        }
+      } catch (e) {}
+    }
+
+    // 7. Build a map of shade number → variant image URL from JSON-LD image array.
+    const variantImageMap = {}; // e.g. "N.1" → "https://...N.1-IVORY.jpg"
+    if (ldProduct.image) {
+      const imgs = Array.isArray(ldProduct.image) ? ldProduct.image : [ldProduct.image];
+      const seen = new Set();
+      for (const img of imgs) {
+        const cleaned = img.split('?')[0];
+        if (seen.has(cleaned)) continue;
+        seen.add(cleaned);
+        const shadeMatch = cleaned.match(/[Nn]\.(\d+)/);
+        if (shadeMatch) {
+          variantImageMap[`N.${shadeMatch[1]}`] = cleaned;
+        }
+      }
+    }
+
+    // 8. Variants from shade buttons
+    const variants = [];
+    const btnRe = /<button[^>]*aria-pressed="[^"]*"[^>]*title="Color:\s*([^"]+)"[^>]*>/g;
+    let bm;
+    while ((bm = btnRe.exec(html))) {
+      const name = decodeEntities(bm[1].trim());
+      const shadeNum = name.match(/([Nn]\.\d+)/);
+      const varImg = shadeNum && variantImageMap[shadeNum[1]] ? variantImageMap[shadeNum[1]] : null;
+      variants.push({
+        name,
+        sku: '',
+        regularPrice: price,
+        salePrice: '',
+        images: varImg ? [varImg] : [],
+        extras: [],
+        colorCode: '',  // user fills color codes manually
+      });
+    }
+
+    if (!variants.length) throw new Error('No shade variants found');
+
+    // 9. Parent image = first variant's image
+    const parentImages = variants[0].images.length ? [variants[0].images[0]] : [];
+
+    if (!variants.length) throw new Error('No shade variants found');
+
+    return { rows: variableRows(title, parentImages, description, '', categories, 'Color', variants), title };
   }
 
   // ── Dispatch ─────────────────────────────────────────────────────────────
@@ -3983,7 +4203,7 @@
     sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
     macadamiahair: { variable: scrapeMacadamiahairSimple, simple: scrapeMacadamiahairSimple },
     acm: { variable: scrapeAcmSimple, simple: scrapeAcmSimple },
-    diegodallapalma: { variable: scrapeDiegodallapalma, simple: scrapeDiegodallapalma },
+    diegodallapalma: { variable: scrapeDiegodallapalma, simple: scrapeDiegodallapalmaSimple },
     eucerin: { variable: scrapeEucerinSimple, simple: scrapeEucerinSimple },
     isdin: { variable: scrapeIsdinSimple, simple: scrapeIsdinSimple },
     bioderma: { variable: scrapeBiodermaSimple, simple: scrapeBiodermaSimple },
@@ -3995,6 +4215,7 @@
     creme21: { variable: scrapeCreme21Simple, simple: scrapeCreme21Simple },
     cantubeauty: { variable: scrapeCantubeautySimple, simple: scrapeCantubeautySimple },
     tajclass: { simple: scrapeTajclassSimple },
+    makeoverpakistan: { variable: scrapeMakeoverPakistan },
   };
 
   // Detect site from a URL hostname.
@@ -4035,6 +4256,7 @@
         'macadamiahair.com': 'macadamiahair',
         'cantubeauty.com': 'cantubeauty',
         'tajclass.com': 'tajclass',
+        'makeoverpakistan.com': 'makeoverpakistan',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -4102,6 +4324,7 @@
     { name: 'Macadamia Hair', domain: 'macadamiahair.com', key: 'macadamiahair', example: 'https://www.macadamiahair.com/products/healing-oil-spray' },
     { name: 'Cantu Shea Beauty', domain: 'cantubeauty.com', key: 'cantubeauty', example: 'https://www.cantubeauty.com/products/curls-coils-waves/coconut-curling-cream/' },
     { name: 'Taj Class', domain: 'tajclass.com', key: 'tajclass', example: 'https://tajclass.com/products/mascara-i-love-extreme-crazy-volume-essence' },
+    { name: 'Makeover Pakistan', domain: 'makeoverpakistan.com', key: 'makeoverpakistan', example: 'https://www.makeoverpakistan.com/shop/skin-liquid-foundation' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key] }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
