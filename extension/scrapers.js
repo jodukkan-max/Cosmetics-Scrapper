@@ -4076,7 +4076,7 @@
     return { rows: simpleRow({ sku, name, description, categories, images, price }), title: name };
   }
 
-  // ── MakeOver Pakistan (Next.js — JSON-LD Product + shade buttons) ──
+  // ── MakeOver Pakistan (JSON-LD Product + shade buttons) ──
   async function scrapeMakeoverPakistan(ctx) {
     const html = ctx.mainHtml;
 
@@ -4126,30 +4126,94 @@
       } catch (e) {}
     }
 
-    // 7. Build a map of shade number → variant image URL from JSON-LD image array.
-    const variantImageMap = {}; // e.g. "N.1" → "https://...N.1-IVORY.jpg"
+    // 7. Collect images from JSON-LD (deduped)
+    let jsonImages = [];
     if (ldProduct.image) {
-      const imgs = Array.isArray(ldProduct.image) ? ldProduct.image : [ldProduct.image];
-      const seen = new Set();
-      for (const img of imgs) {
-        const cleaned = img.split('?')[0];
-        if (seen.has(cleaned)) continue;
-        seen.add(cleaned);
-        const shadeMatch = cleaned.match(/[Nn]\.(\d+)/);
-        if (shadeMatch) {
-          variantImageMap[`N.${shadeMatch[1]}`] = cleaned;
+      jsonImages = (Array.isArray(ldProduct.image) ? ldProduct.image : [ldProduct.image])
+        .map(img => img.split('?')[0]);
+    }
+    const seenImg = new Set();
+    jsonImages = jsonImages.filter(img => { if (seenImg.has(img)) return false; seenImg.add(img); return true; });
+
+    // 8. Collect ALL gallery image URLs from HTML & build shade-code → image map
+    //    Also build an alt-text → image map where gallery images have variant-specific alt text
+    const shadeMap = {}; // shade code (e.g. "N.1") → image URL
+    const altMap = {}; // variant name from alt text → image URL
+    const galleryImages = []; // all gallery image URLs in order
+    let gallerySelected = null; // the image that's currently selected (aria-pressed="true")
+    const galleryRe = /<button[^>]*aria-label="Show image \d+"[^>]*>([\s\S]*?)<\/button>/gi;
+    let gb;
+    while ((gb = galleryRe.exec(html))) {
+      const btnHtml = gb[1];
+      const altMatch = btnHtml.match(/alt="([^"]+)"/);
+      const srcMatch = btnHtml.match(/src="([^"]+)"/);
+      if (!srcMatch) continue;
+      const alt = altMatch ? decodeEntities(altMatch[1].trim()) : '';
+      const src = decodeEntities(srcMatch[1].trim()).split('?')[0];
+      if (!src.startsWith('http')) continue;
+
+      galleryImages.push(src);
+      if (/aria-pressed="true"/i.test(gb[0])) {
+        gallerySelected = src;
+      }
+
+      // Extract shade code from filename, e.g. "N.1" from "N.1-Neutral.jpg"
+      const fn = src.split('/').pop().toLowerCase();
+      const shadeMatch = fn.match(/([nN]o?\.?\s*\d+[a-zA-Z]*)/);
+      if (shadeMatch) {
+        // Normalize: "n.1", "N.1", "no.1", "No. 1" → "N.1"
+        const normalized = shadeMatch[1].toUpperCase().replace(/^NO\.?\s*/, 'N.').replace(/\s/g, '');
+        shadeMap[normalized] = src;
+      }
+
+      // Alt-text mapping: alt="COLOR: HD Skin Primer 02" → variant "HD Skin Primer 02"
+      if (alt) {
+        const variantName = alt.replace(/^COLOR:\s*/i, '');
+        if (variantName && variantName !== title) {
+          altMap[variantName] = src;
         }
       }
     }
 
-    // 8. Variants from shade buttons
+    // 9. Variants from shade buttons (case-insensitive COLOR prefix)
     const variants = [];
-    const btnRe = /<button[^>]*aria-pressed="[^"]*"[^>]*title="Color:\s*([^"]+)"[^>]*>/g;
+    const btnRe = /<button[^>]*aria-pressed="[^"]*"[^>]*title="COLOR:\s*([^"]+)"[^>]*>/gi;
     let bm;
     while ((bm = btnRe.exec(html))) {
       const name = decodeEntities(bm[1].trim());
-      const shadeNum = name.match(/([Nn]\.\d+)/);
-      const varImg = shadeNum && variantImageMap[shadeNum[1]] ? variantImageMap[shadeNum[1]] : null;
+      let varImg = null;
+
+      // Priority 1: extract shade code from variant name, match against shadeMap
+      const shadeCode = name.match(/([Nn]\.\d+|[Nn]o\.\d+|#\d+)/);
+      if (shadeCode) {
+        const normalized = shadeCode[1].toUpperCase().replace(/^NO\./, 'N.');
+        if (shadeMap[normalized]) {
+          varImg = shadeMap[normalized];
+        }
+      }
+
+      // Priority 2: exact match via gallery alt text
+      if (!varImg && altMap[name]) {
+        varImg = altMap[name];
+      }
+
+      // Priority 3: keyword match from variant name against gallery image filenames
+      if (!varImg) {
+        const keywords = name.split(/[\s.-]+/).filter(w => w.length > 2);
+        for (const img of galleryImages) {
+          const fn = img.split('/').pop().toLowerCase();
+          if (keywords.some(kw => fn.includes(kw.toLowerCase()))) {
+            varImg = img;
+            break;
+          }
+        }
+      }
+
+      // Priority 4: fall back to currently selected gallery image
+      if (!varImg) {
+        varImg = gallerySelected;
+      }
+
       variants.push({
         name,
         sku: '',
@@ -4157,16 +4221,15 @@
         salePrice: '',
         images: varImg ? [varImg] : [],
         extras: [],
-        colorCode: '',  // user fills color codes manually
+        colorCode: '',
       });
     }
 
     if (!variants.length) throw new Error('No shade variants found');
 
-    // 9. Parent image = first variant's image
-    const parentImages = variants[0].images.length ? [variants[0].images[0]] : [];
-
-    if (!variants.length) throw new Error('No shade variants found');
+    // 10. Parent image = first variant's image, or first JSON-LD image
+    const parentImages = variants[0].images.length ? [variants[0].images[0]]
+      : (jsonImages.length ? [jsonImages[0]] : []);
 
     return { rows: variableRows(title, parentImages, description, '', categories, 'Color', variants), title };
   }
