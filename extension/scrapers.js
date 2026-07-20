@@ -100,7 +100,7 @@
       rows.push({
         ID: rowId++, Parent: `id:${parentId}`, Type: 'variation', SKU: v.sku || '', Name: title,
         Images: v.images && v.images.length ? [v.images[0]] : [],
-        'Rey Variations extra images': '',
+        'Rey Variations extra images': (v.extras && v.extras.length) ? v.extras : [],
         Description: '', 'Short Description': '', Categories: '',
         'Regular Price': '15', 'Sale Price': '',
         'Attribute 1 name': optionName, 'Attribute 1 value(s)': v.name,
@@ -4295,6 +4295,158 @@
     return { rows: variableRows(title, parentImages, description, '', categories, 'Color', variants), title };
   }
 
+  // ── Care To Beauty (separate page per shade — fetch all variant URLs) ──
+  // caretobeauty.com lists each shade as a separate product page with its own
+  // JSON-LD. The swatch strip on the current page provides hex codes and URLs.
+  async function scrapeCaretoBeauty(ctx) {
+    const html = ctx.mainHtml; const url = ctx.url;
+
+    // 1. Parse JSON-LD (may be an array with Product inside)
+    const blocks = ldBlocks(html);
+    let ldProduct = null;
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        const p = Array.isArray(j) ? j.find(x => x['@type'] === 'Product') : j;
+        if (p && p['@type'] === 'Product') { ldProduct = p; break; }
+      } catch (e) {}
+    }
+    if (!ldProduct) throw new Error('Product JSON-LD not found');
+
+    // 2. Base title — strip shade suffix. Prefer isRelatedTo name if available.
+    let title = '';
+    if (ldProduct.isRelatedTo && ldProduct.isRelatedTo.name) {
+      title = decodeEntities(ldProduct.isRelatedTo.name);
+    }
+    if (!title) {
+      title = decodeEntities(ldProduct.name || '');
+      // Strip " - 02 Vanilla" suffix, or "02 Vanilla 5.5g"
+      const m = title.match(/^(.*?)\s*(?:-\s*)?\d{2}\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s*\d*g?$/);
+      if (m && m[1].trim().length > 3) title = m[1].trim();
+    }
+
+    // 3. Description & categories from JSON-LD
+    let description = decodeEntities(ldProduct.description || '').replace(/\s+/g, ' ').trim();
+    let categories = '';
+    if (ldProduct.category) {
+      const parts = ldProduct.category.split('>').map(c => c.trim()).filter(Boolean);
+      const skip = new Set(['health & beauty', 'personal care', 'cosmetics']);
+      const filtered = parts.filter(c => !skip.has(c.toLowerCase()));
+      categories = filtered.join(', ');
+    }
+
+    // 4. Price from current page
+    let price = '';
+    if (ldProduct.offers && ldProduct.offers.price != null) {
+      const p = parseFloat(ldProduct.offers.price);
+      price = isFinite(p) ? p.toFixed(2) : '';
+    }
+
+    // 5. Parse variant options from data-props (works for both color and non-color variants)
+    // Color products: label="Colors", with box-color swatches for hex codes
+    // Non-color products: label="Shades" (or other), no hex codes
+    const variantOptions = []; // { value (URL), name (cleaned) }
+    const propsMatches = [...html.matchAll(/data-props="([^"]+)"/g)];
+    for (const pm of propsMatches) {
+      try {
+        const d = JSON.parse(pm[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
+        if (d.options && d.label) {
+          for (const opt of d.options) {
+            if (!opt.value || !opt.name) continue;
+            if (/^view all/i.test(opt.name)) continue; // skip "View All Options"
+            // Strip marketing suffixes: " - X% Off - Out of Stock", " - X% Off", etc.
+            const cleaned = opt.name
+              .replace(/\s*-\s*\d+%\s*Off[\s-]*(?:Out\s*of\s*Stock)?[\s-]*(?:Discontinued\s*Color)?$/i, '');
+            variantOptions.push({ url: opt.value, name: cleaned });
+          }
+          break;
+        }
+      } catch (e) {}
+    }
+    if (!variantOptions.length) throw new Error('No variant options found');
+
+    // 6. Extract color swatch hex codes (present only for color products)
+    // <a href="URL" class="product-configurations__box-color">
+    //   <div style="background-color: #HEX">
+    const hexByUrl = {}; // URL → hex code
+    const swatchRe = /<a\s[^>]*href="([^"]+)"[^>]*class="[^"]*product-configurations__box-color[^"]*"[^>]*>\s*<div[^>]*style="background-color:\s*([^";]+)/gi;
+    let sm;
+    while ((sm = swatchRe.exec(html))) {
+      hexByUrl[sm[1].trim()] = sm[2].trim();
+    }
+
+    // URL → name fallback for shade names not captured in data-props
+    function shadeNameFromUrl(u) {
+      let slug = u.replace(/\/+$/, '').split('/').pop().replace(/-new$/, '');
+      const m = slug.match(/-(\d{2,3})-([a-z]+(?:-[a-z]+)*?)(?:-\d+)/);
+      if (m) return m[1] + ' ' + m[2].split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      return '';
+    }
+
+    // 7. Fetch each variant's own page for SKU, price, and image
+    const variants = [];
+    for (let i = 0; i < variantOptions.length; i++) {
+      const { url: varUrl, name: optName } = variantOptions[i];
+      const hex = hexByUrl[varUrl] || '';
+      const name = shadeNameFromUrl(varUrl) || optName;
+      let sku = '', varPrice = '', varImg = '', varExtras = [];
+
+      try {
+        const norm = u => u.replace(/\/+$/, '').replace(/^https?:/, '');
+        const pageHtml = norm(varUrl) === norm(url) ? html : await ctx.fetchText(varUrl);
+        const vBlocks = ldBlocks(pageHtml);
+        for (const raw of vBlocks) {
+          try {
+            const j = JSON.parse(raw);
+            const vp = Array.isArray(j) ? j.find(x => x['@type'] === 'Product') : j;
+            if (vp && vp['@type'] === 'Product') {
+              sku = vp.gtin || vp.sku || '';
+              if (vp.offers && vp.offers.price != null) {
+                const p = parseFloat(vp.offers.price);
+                varPrice = isFinite(p) ? p.toFixed(2) : '';
+              }
+              // Collect all images from variant page (ImageObject or string URL)
+              if (vp.image) {
+                const imgs = Array.isArray(vp.image) ? vp.image : [vp.image];
+                const urls = imgs.map(img => {
+                  const raw = (typeof img === 'object' && img.url ? img.url : String(img));
+                  return raw.split('?')[0];
+                });
+                varImg = urls[0] || '';
+                varExtras = urls.slice(1);
+              }
+              break;
+            }
+          } catch (e) {}
+        }
+      } catch (e) { console.warn('Care To Beauty variant fetch failed:', varUrl, e.message); }
+
+      variants.push({
+        name: name || hex,
+        sku,
+        regularPrice: varPrice || price,
+        salePrice: '',
+        images: varImg ? [varImg] : [],
+        extras: varExtras,
+        colorCode: hex,
+      });
+    }
+
+    if (!variants.length) throw new Error('No variants could be extracted');
+
+    // 8. Parent images from current page's JSON-LD product gallery
+    let parentImages = [];
+    if (ldProduct.image) {
+      const imgs = Array.isArray(ldProduct.image) ? ldProduct.image : [ldProduct.image];
+      parentImages = imgs.map(img => {
+        const raw = (typeof img === 'object' && img.url ? img.url : String(img));
+        return raw.split('?')[0];
+      });
+    }
+
+    return { rows: variableRows(title, parentImages.slice(0, 4), description, '', categories, 'Color', variants), title };
+  }
+
   // ── Dispatch ─────────────────────────────────────────────────────────────
   const SCRAPERS = {
     nyx: { variable: scrapeNyx, simple: scrapeNyxSimple },
@@ -4347,6 +4499,7 @@
     cantubeauty: { variable: scrapeCantubeautySimple, simple: scrapeCantubeautySimple },
     tajclass: { simple: scrapeTajclassSimple },
     makeoverpakistan: { variable: scrapeMakeoverPakistan },
+    caretobeauty: { variable: scrapeCaretoBeauty },
   };
 
   // Detect site from a URL hostname.
@@ -4388,6 +4541,7 @@
         'cantubeauty.com': 'cantubeauty',
         'tajclass.com': 'tajclass',
         'makeoverpakistan.com': 'makeoverpakistan',
+        'caretobeauty.com': 'caretobeauty',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -4456,6 +4610,7 @@
     { name: 'Cantu Shea Beauty', domain: 'cantubeauty.com', key: 'cantubeauty', example: 'https://www.cantubeauty.com/products/curls-coils-waves/coconut-curling-cream/' },
     { name: 'Taj Class', domain: 'tajclass.com', key: 'tajclass', example: 'https://tajclass.com/products/mascara-i-love-extreme-crazy-volume-essence' },
     { name: 'Makeover Pakistan', domain: 'makeoverpakistan.com', key: 'makeoverpakistan', example: 'https://www.makeoverpakistan.com/shop/high-perfection-foundation' },
+    { name: 'Care To Beauty', domain: 'caretobeauty.com', key: 'caretobeauty', example: 'https://www.caretobeauty.com/jo/bell-hypoallergenic-soft-cream-concealer-02-vanilla-5-5g/' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key] }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
