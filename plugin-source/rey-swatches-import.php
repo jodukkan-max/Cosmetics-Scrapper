@@ -5,7 +5,7 @@
  * Description:  Receives CSV data from the Cosmetics Scraper Chrome extension and
  *               imports WooCommerce variable products with full Rey theme swatch
  *               support (color swatches, image swatches, extra variation images).
- * Version:      1.6.2
+ * Version:      1.7.0
  * Author:       Cosmetics Scraper Team
  * License:      GPL-2.0+
  * Requires PHP: 7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('RSI_VERSION', '1.6.2');
+define('RSI_VERSION', '1.7.0');
 define('RSI_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('RSI_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('RSI_REST_NAMESPACE', 'scraper/v1');
@@ -26,7 +26,6 @@ define('RSI_REST_ROUTE', '/import-csv');
 // Autoload classes.
 require_once RSI_PLUGIN_DIR . 'includes/class-csv-parser.php';
 require_once RSI_PLUGIN_DIR . 'includes/class-image-handler.php';
-require_once RSI_PLUGIN_DIR . 'includes/class-image-compressor.php';
 require_once RSI_PLUGIN_DIR . 'includes/class-rey-swatches.php';
 require_once RSI_PLUGIN_DIR . 'includes/class-product-creator.php';
 require_once RSI_PLUGIN_DIR . 'includes/class-rest-endpoint.php';
@@ -51,13 +50,6 @@ add_filter('rest_pre_serve_request', function ($served) {
     header('Access-Control-Allow-Headers: X-Scraper-Key, Content-Type');
     return $served;
 });
-
-/**
- * Compress uploaded images above 300 KB using PHP GD.
- * Hooks into all WordPress uploads, including those from WooCommerce's
- * internal REST API (primary product/variation images).
- */
-add_filter('wp_handle_upload', ['Rsi_Image_Compressor', 'filter_upload']);
 
 /**
  * Register the admin page.

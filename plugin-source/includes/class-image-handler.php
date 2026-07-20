@@ -136,14 +136,6 @@ class Rsi_Image_Handler {
             return 0;
         }
 
-        // Compress the image if it's above the threshold (300 KB).
-        // This covers extra variation images and swatch images handled directly
-        // by this class (primary product images are compressed via the
-        // wp_handle_upload filter in the main plugin file).
-        if (class_exists('Rsi_Image_Compressor')) {
-            Rsi_Image_Compressor::compress($sideload['file']);
-        }
-
         // Insert attachment into the media library.
         $attachment = [
             'guid'           => $sideload['url'],

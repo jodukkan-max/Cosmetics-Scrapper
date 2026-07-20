@@ -1588,8 +1588,9 @@
 
   function makeoverAbsUrl(src, pageUrl) {
     if (!src) return '';
-    // Saved HTML uses ./MAKEOVER_files/ prefix; live site uses uploadfile/
-    src = src.replace(/^\.\/MAKEOVER_files\//, 'uploadfile/');
+    // Saved HTML uses various prefixes like ./MAKEOVER_files/, ./cleanser water_files/, etc.
+    // Strip any ./NAME files/ prefix and replace with uploadfile/
+    src = src.replace(/^\.\/[^\/]+\s*files\//i, 'uploadfile/');
     if (/^https?:\/\//.test(src)) return src;
     try {
       return new URL(src, pageUrl).href;
@@ -1600,10 +1601,11 @@
   }
 
   function makeoverImages(html, pageUrl, excludeSet) {
-    // Collect unique uploadfile images from the page
+    // Collect unique product images. On live site the path is uploadfile/FILENAME;
+    // on saved HTML it's ./PRODUCT_files/FILENAME.
     const seen = new Set();
     const out = [];
-    const re = /src=["']([^"']*(?:uploadfile\/[^"']*\.(?:jpg|jpeg|png|gif)))["']/gi;
+    const re = /src=["']([^"']*(?:(?:uploadfile\/|files\/)(\d{12,}\.\w+)))["']/gi;
     let m;
     while ((m = re.exec(html))) {
       const raw = makeoverAbsUrl(m[1], pageUrl);
@@ -1727,13 +1729,21 @@
     const html = ctx.mainHtml;
     const pageUrl = ctx.url;
 
-    // Product name — from <title> or meta og:title
+    // Product name — from meta og:title, <title>, or URL-based fallback
     let name = '';
     const ogTitle = (html.match(/property="og:title"\s+content="([^"]+)"/) || [])[1];
     if (ogTitle) name = decodeEntities(ogTitle.trim());
     if (!name) {
       const titleTag = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/) || [])[1] || '';
       name = decodeEntities(titleTag.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+    // Fallback: product name from URL (e.g. products.asp?id1=2&id2=19&id3=124)
+    if (!name || name === 'MAKEOVER') {
+      try {
+        const params = new URL(pageUrl).searchParams;
+        const id3 = params.get('id3');
+        if (id3) name = `MakeOver Product ${id3}`;
+      } catch (e) {}
     }
     if (!name) name = 'MakeOver Product';
 
@@ -1748,12 +1758,26 @@
 
     // Images — mainpic + any gallery images
     const parentSet = new Set();
+    // Get main image from id="mainpic" (saved HTML has full path, live site uses JS imgshow2)
     let mainpic = (html.match(/id="mainpic"[^>]*src="([^"]+)"/) || [])[1] || '';
+    // If mainpic src is just "uploadfile/", try the imgshow2 JS call
+    if (!mainpic || mainpic === 'uploadfile/') {
+      const jsMatch = html.match(/imgshow2\('[^']*'\s*,\s*'([^']*)'/);
+      if (jsMatch) mainpic = 'uploadfile/' + jsMatch[1];
+    }
     mainpic = makeoverAbsUrl(mainpic, pageUrl);
-    if (mainpic) parentSet.add(mainpic);
+    if (mainpic && !mainpic.endsWith('/')) parentSet.add(mainpic);
 
     const allImgs = makeoverImages(html, pageUrl, null);
     for (const img of allImgs) parentSet.add(img);
+
+    // Deduplicate by filename, limit to main image
+    const byBasename = new Map();
+    for (const img of [...parentSet]) {
+      const base = img.split('/').pop().split('?')[0];
+      if (!byBasename.has(base)) byBasename.set(base, img);
+    }
+    const images = [...byBasename.values()].slice(0, 10);
 
     // Description
     let description = '';
@@ -1763,7 +1787,7 @@
       description = decodeEntities(descBlock.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
     }
 
-    return { rows: simpleRow({ sku, name, description, images: [...parentSet].slice(0, 10) }), title: name };
+    return { rows: simpleRow({ sku, name, description, images: [mainpic].filter(Boolean) }), title: name };
   }
 
   // ── Topface (Shopify; GloboSwatchConfig.product for full product data) ─────
@@ -4410,7 +4434,8 @@
                 const imgs = Array.isArray(vp.image) ? vp.image : [vp.image];
                 const urls = imgs.map(img => {
                   const raw = (typeof img === 'object' && img.url ? img.url : String(img));
-                  return raw.split('?')[0];
+                  // Strip Cloudflare CDN resizing prefix for full-size image
+                  return raw.split('?')[0].replace(/cdn-cgi\/image\/[^\/]+\//, '');
                 });
                 varImg = urls[0] || '';
                 varExtras = urls.slice(1);
@@ -4440,11 +4465,116 @@
       const imgs = Array.isArray(ldProduct.image) ? ldProduct.image : [ldProduct.image];
       parentImages = imgs.map(img => {
         const raw = (typeof img === 'object' && img.url ? img.url : String(img));
-        return raw.split('?')[0];
+        // Strip Cloudflare CDN resizing prefix for full-size image
+        return raw.split('?')[0].replace(/cdn-cgi\/image\/[^\/]+\//, '');
       });
     }
 
     return { rows: variableRows(title, parentImages.slice(0, 4), description, '', categories, 'Color', variants), title };
+  }
+
+  // ── Notino (JSON-LD offers with colors from color-picker HTML) ──────
+  // notino.co.uk embeds all variant data in a single JSON-LD Product block
+  // with an offers array. Color hex codes live in the color-picker <a> links
+  // as CSS custom properties: --c1k09ts5-2: #HEX.
+  async function scrapeNotino(ctx) {
+    const html = ctx.mainHtml; const url = ctx.url;
+
+    // 1. Parse JSON-LD
+    const blocks = ldBlocks(html);
+    let ldProduct = null;
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { ldProduct = j; break; }
+      } catch (e) {}
+    }
+    if (!ldProduct) throw new Error('Product JSON-LD not found');
+
+    // 2. Title — strip shade suffix from name
+    let title = decodeEntities(ldProduct.name || '');
+    // Name includes shade: "MAC Cosmetics MACximal Sleek Satin Lipstick Mini shade CENTRE OF ATTENTION 1.5 g"
+    // Strip "shade XXXX" and size suffix
+    title = title.replace(/\s+shade\s+[A-Za-z\s'-]+\s+\d[\d.]*\s*g?/i, '').trim();
+    // Also try: strip everything after the last dash-space-shade pattern
+    if (!title || title.length < 5) {
+      title = decodeEntities(ldProduct.name || '').split(' shade ')[0].trim();
+    }
+
+    // 3. Description
+    let description = decodeEntities(ldProduct.description || '');
+    description = description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    // 4. Parent images from JSON-LD — prefer detail_main_uhq for highest quality
+    let parentImages = [];
+    if (ldProduct.image) {
+      const imgs = Array.isArray(ldProduct.image) ? ldProduct.image : [ldProduct.image];
+      parentImages = imgs.map(img => {
+        const raw = (typeof img === 'object' && img.url ? img.url : String(img));
+        return raw.split('?')[0].replace(/order_2k\//, 'detail_main_uhq/');
+      }).filter(Boolean);
+    }
+
+    // 5. Build color map from HTML color picker
+    // <a id="pd-variant-NNNNN" href=".../p-NNNNN/">...--c1k09ts5-2: #HEX...
+    const pIdToColor = {};
+    const pickerRe = /<a\s[^>]*id="pd-variant-(\d+)"[^>]*href="[^"]*\/p-(\d+)\/[^"]*"[^>]*>[\s\S]*?--c1k09ts5-2:\s*(#[A-Fa-f0-9]+)/g;
+    let pm;
+    while ((pm = pickerRe.exec(html))) {
+      const pId = pm[2];
+      const hex = pm[3].toUpperCase();
+      if (!pIdToColor[pId]) pIdToColor[pId] = hex;
+    }
+
+    // 6. Deduplicate offers by SKU and build variants
+    const offers = Array.isArray(ldProduct.offers) ? ldProduct.offers : [ldProduct.offers];
+    const seen = new Map();
+    for (const o of offers) {
+      if (o.sku && !seen.has(o.sku)) seen.set(o.sku, o);
+    }
+    const uniqueOffers = [...seen.values()];
+
+    const variants = [];
+    for (const o of uniqueOffers) {
+      // Extract shade name from offer.name: "shade CENTRE OF ATTENTION 1.5 g"
+      let shade = '';
+      const shadeMatch = (o.name || '').match(/shade\s+([A-Za-z\s'-]+?)\s+\d/);
+      if (shadeMatch) shade = shadeMatch[1].trim();
+      // Fallback: extract from URL slug
+      if (!shade) {
+        const slug = (o.url || '').split('/').filter(Boolean).pop() || '';
+        const slugMatch = slug.match(/shade-([a-z0-9-]+)/);
+        if (slugMatch) shade = slugMatch[1].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      }
+
+      // Extract p-XXXXX from offer URL to look up color
+      const pId = ((o.url || '').match(/\/p-(\d+)\//) || [])[1] || '';
+      const colorCode = pIdToColor[pId] || '';
+
+      // Price
+      let offerPrice = '';
+      if (o.price != null) {
+        const p = parseFloat(o.price);
+        offerPrice = isFinite(p) ? p.toFixed(2) : '';
+      }
+
+      // Image — prefer detail_main_uhq for highest quality
+      const offerImg = typeof o.image === 'string' ? o.image.split('?')[0].replace(/order_2k\//, 'detail_main_uhq/') : '';
+
+      variants.push({
+        name: shade || o.name || '',
+        sku: o.sku || '',
+        regularPrice: offerPrice,
+        salePrice: '',
+        images: offerImg ? [offerImg] : [],
+        extras: [],
+        colorCode,
+      });
+    }
+
+    if (!variants.length) throw new Error('No variants could be extracted');
+
+    return { rows: variableRows(title, parentImages.slice(0, 4), description, '', '', 'Color', variants), title };
   }
 
   // ── Dispatch ─────────────────────────────────────────────────────────────
@@ -4500,6 +4630,7 @@
     tajclass: { simple: scrapeTajclassSimple },
     makeoverpakistan: { variable: scrapeMakeoverPakistan },
     caretobeauty: { variable: scrapeCaretoBeauty },
+    notino: { variable: scrapeNotino },
   };
 
   // Detect site from a URL hostname.
@@ -4542,6 +4673,7 @@
         'tajclass.com': 'tajclass',
         'makeoverpakistan.com': 'makeoverpakistan',
         'caretobeauty.com': 'caretobeauty',
+        'notino.co.uk': 'notino',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -4611,6 +4743,7 @@
     { name: 'Taj Class', domain: 'tajclass.com', key: 'tajclass', example: 'https://tajclass.com/products/mascara-i-love-extreme-crazy-volume-essence' },
     { name: 'Makeover Pakistan', domain: 'makeoverpakistan.com', key: 'makeoverpakistan', example: 'https://www.makeoverpakistan.com/shop/high-perfection-foundation' },
     { name: 'Care To Beauty', domain: 'caretobeauty.com', key: 'caretobeauty', example: 'https://www.caretobeauty.com/jo/bell-hypoallergenic-soft-cream-concealer-02-vanilla-5-5g/' },
+    { name: 'Notino', domain: 'notino.co.uk', key: 'notino', example: 'https://www.notino.co.uk/mac-cosmetics/macximal-sleek-satin-lipstick-mini-satin-lipstick-for-the-perfect-look/' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key] }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
