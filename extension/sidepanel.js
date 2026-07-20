@@ -236,7 +236,13 @@ function tsvOf(columns, rows) {
 }
 function csvOf(columns, rows) {
   const esc = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  return [columns.map(esc).join(','), ...rows.map(r => columns.map(c => esc(cellValue(c, r, rows))).join(','))].join('\n');
+  return [columns.map(esc).join(','), ...rows.map(r => columns.map(c => {
+    if (c === 'Images' || c === 'Rey Variations extra images') {
+      const v = r[c]; const a = Array.isArray(v) ? v : (v ? [v] : []);
+      return esc(a.join('|'));
+    }
+    return esc(cellValue(c, r, rows));
+  }).join(','))].join('\n');
 }
 function downloadCsvFile(csv, name) {
   const a = document.createElement('a');

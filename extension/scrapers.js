@@ -4076,7 +4076,10 @@
     return { rows: simpleRow({ sku, name, description, categories, images, price }), title: name };
   }
 
-  // ── MakeOver Pakistan (JSON-LD Product + shade buttons) ──
+  // ── MakeOver Pakistan (JSON-LD Product with Next.js gallery) ──
+  // makeoverpakistan.com is a Next.js site. Product data is in JSON-LD and
+  // variant buttons use title="COLOR: Name". On saved HTML where React hasn't
+  // hydrated, variants are extracted from gallery image filenames (N.X shade codes).
   async function scrapeMakeoverPakistan(ctx) {
     const html = ctx.mainHtml;
 
@@ -4098,20 +4101,18 @@
       title = h1 ? decodeEntities(h1[1].trim()) : 'Makeover Pakistan Product';
     }
 
-    // 3. SKU
-    const sku = ldProduct.sku || '';
-
-    // 4. Price
+    // 3. Price (converted to two decimal places)
     let price = '';
-    if (ldProduct.offers && ldProduct.offers.price) {
-      price = parseFloat(ldProduct.offers.price).toFixed(2);
+    if (ldProduct.offers && ldProduct.offers.price != null) {
+      const p = parseFloat(ldProduct.offers.price);
+      price = isFinite(p) ? p.toFixed(2) : '';
     }
 
-    // 5. Description from JSON-LD (collapsed whitespace)
+    // 4. Description from JSON-LD
     let description = decodeEntities(ldProduct.description || '');
     description = description.replace(/\s+/g, ' ').trim();
 
-    // 6. Categories from BreadcrumbList JSON-LD
+    // 5. Categories from BreadcrumbList JSON-LD
     let categories = '';
     for (const raw of blocks) {
       try {
@@ -4120,27 +4121,28 @@
           categories = j.itemListElement
             .map(i => i.name || (i.item && i.item.name) || '')
             .filter(c => c && !/^home$/i.test(c))
-            .join(' > ');
+            .join(', ');
           break;
         }
       } catch (e) {}
     }
 
-    // 7. Collect images from JSON-LD (deduped)
-    let jsonImages = [];
-    if (ldProduct.image) {
-      jsonImages = (Array.isArray(ldProduct.image) ? ldProduct.image : [ldProduct.image])
-        .map(img => img.split('?')[0]);
-    }
-    const seenImg = new Set();
-    jsonImages = jsonImages.filter(img => { if (seenImg.has(img)) return false; seenImg.add(img); return true; });
+    // 6. Collect gallery images from <button aria-label="Show image N"> elements
+    //    Build shade-map from filenames and alt-map from alt text.
+    //    Separate product images (no shade code) from variant images.
+    const shadeMap = {};   // normalized shade code → image URL
+    const altMap = {};     // alt text (stripped of "Color:" prefix) → image URL
+    const galleryImages = []; // ordered list of all gallery images
+    const productImages = []; // non-variant gallery images (for parent)
+    let gallerySelected = null;
 
-    // 8. Collect ALL gallery image URLs from HTML & build shade-code → image map
-    //    Also build an alt-text → image map where gallery images have variant-specific alt text
-    const shadeMap = {}; // shade code (e.g. "N.1") → image URL
-    const altMap = {}; // variant name from alt text → image URL
-    const galleryImages = []; // all gallery image URLs in order
-    let gallerySelected = null; // the image that's currently selected (aria-pressed="true")
+    // Build list of JSON-LD image URLs for saved-HTML fallback matching
+    const ldImageUrls = [];
+    if (ldProduct.image) {
+      (Array.isArray(ldProduct.image) ? ldProduct.image : [ldProduct.image])
+        .forEach(u => ldImageUrls.push(u));
+    }
+
     const galleryRe = /<button[^>]*aria-label="Show image \d+"[^>]*>([\s\S]*?)<\/button>/gi;
     let gb;
     while ((gb = galleryRe.exec(html))) {
@@ -4149,87 +4151,142 @@
       const srcMatch = btnHtml.match(/src="([^"]+)"/);
       if (!srcMatch) continue;
       const alt = altMatch ? decodeEntities(altMatch[1].trim()) : '';
-      const src = decodeEntities(srcMatch[1].trim()).split('?')[0];
-      if (!src.startsWith('http')) continue;
+      let src = decodeEntities(srcMatch[1].trim());
+      let srcForGallery = null; // final resolved URL for the gallery
 
+      // On the live page, src is a full Cloudinary URL.
+      // On saved HTML, src is a local path like ./site_files/UUID-N.1-Neutral.jpg
+      if (src.startsWith('http')) {
+        srcForGallery = src.split('?')[0];
+      } else {
+        // Saved HTML — extract filename and match against JSON-LD images
+        const localFn = src.split('/').pop().split('?')[0];
+        const match = ldImageUrls.find(u => decodeURIComponent(u).includes(localFn));
+        if (match) {
+          srcForGallery = match.split('?')[0];
+        } else {
+          // Fallback: try matching shade code from alt text against JSON-LD URLs
+          if (alt && /^color/i.test(alt)) {
+            const altShade = alt.replace(/^color:\s*/i, '').trim();
+            const sc = altShade.match(/([Nn]\.\d+|[Nn]o\.\d+)/);
+            if (sc) {
+              const normCode = sc[1].toUpperCase().replace(/^NO\./, 'N.').replace(/\s/g, '');
+              const ldMatch = ldImageUrls.find(u => {
+                const ufn = decodeURIComponent(u.split('/').pop().toLowerCase());
+                return ufn.includes(normCode.toLowerCase());
+              });
+              if (ldMatch) srcForGallery = ldMatch.split('?')[0];
+            }
+          }
+        }
+      }
+      if (!srcForGallery) continue;
+
+      src = srcForGallery;
       galleryImages.push(src);
+
       if (/aria-pressed="true"/i.test(gb[0])) {
         gallerySelected = src;
       }
 
-      // Extract shade code from filename, e.g. "N.1" from "N.1-Neutral.jpg"
+      // Extract shade code from filename (e.g. "N.1" from "N.1-Neutral.jpg")
       const fn = src.split('/').pop().toLowerCase();
       const shadeMatch = fn.match(/([nN]o?\.?\s*\d+[a-zA-Z]*)/);
       if (shadeMatch) {
-        // Normalize: "n.1", "N.1", "no.1", "No. 1" → "N.1"
         const normalized = shadeMatch[1].toUpperCase().replace(/^NO\.?\s*/, 'N.').replace(/\s/g, '');
         shadeMap[normalized] = src;
+      } else {
+        // No shade code in filename → this is a product image, not a variant
+        productImages.push(src);
       }
 
-      // Alt-text mapping: alt="COLOR: HD Skin Primer 02" → variant "HD Skin Primer 02"
-      if (alt) {
-        const variantName = alt.replace(/^COLOR:\s*/i, '');
-        if (variantName && variantName !== title) {
-          altMap[variantName] = src;
-        }
+      // Alt-text mapping: "Color: N.6 TAWNY" → variant name
+      if (alt && /^color/i.test(alt)) {
+        const variantName = alt.replace(/^color:\s*/i, '');
+        if (variantName) altMap[variantName] = src;
       }
     }
 
-    // 9. Variants from shade buttons (case-insensitive COLOR prefix)
+    // 7. Build variant name from shade filename (e.g. "N.1-Neutral.jpg" → "N.1 Neutral")
+    function shadeNameFromFilename(url) {
+      // Strip UUID prefix if present (e.g., "2d317e45-...-N.1-Neutral.jpg" → "N.1-Neutral.jpg")
+      let fn = decodeURIComponent(url.split('/').pop().split('?')[0]);
+      fn = fn.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/, '');
+      const m = fn.match(/^([nN]o?\.?\s*\d+)\s*-?\s*([a-zA-Z].*)\.(?:jpg|jpeg|png|webp|gif)/i);
+      if (!m) return null;
+      const code = m[1].replace(/^no\.?\s*/i, 'N.').replace(/\s/g, '');
+      const name = m[2].replace(/[-_]/g, ' ').trim();
+      // Capitalise first letter of each word in the descriptive part
+      const displayName = name.replace(/\b\w/g, c => c.toUpperCase());
+      return code + ' ' + displayName;
+    }
+
+    // 8. Extract variants — priority: button titles → alt text → shade codes in images
     const variants = [];
+    const seenVariantNames = new Set();
+
+    // Priority 1: shade buttons with title="COLOR: ..." (live page)
     const btnRe = /<button[^>]*aria-pressed="[^"]*"[^>]*title="COLOR:\s*([^"]+)"[^>]*>/gi;
     let bm;
     while ((bm = btnRe.exec(html))) {
       const name = decodeEntities(bm[1].trim());
-      let varImg = null;
+      if (seenVariantNames.has(name)) continue;
+      seenVariantNames.add(name);
 
-      // Priority 1: extract shade code from variant name, match against shadeMap
+      let varImg = null;
       const shadeCode = name.match(/([Nn]\.\d+|[Nn]o\.\d+|#\d+)/);
       if (shadeCode) {
         const normalized = shadeCode[1].toUpperCase().replace(/^NO\./, 'N.');
-        if (shadeMap[normalized]) {
-          varImg = shadeMap[normalized];
-        }
+        varImg = shadeMap[normalized] || null;
       }
-
-      // Priority 2: exact match via gallery alt text
-      if (!varImg && altMap[name]) {
-        varImg = altMap[name];
-      }
-
-      // Priority 3: keyword match from variant name against gallery image filenames
+      if (!varImg && altMap[name]) varImg = altMap[name];
+      // Keyword fallback
       if (!varImg) {
         const keywords = name.split(/[\s.-]+/).filter(w => w.length > 2);
         for (const img of galleryImages) {
           const fn = img.split('/').pop().toLowerCase();
-          if (keywords.some(kw => fn.includes(kw.toLowerCase()))) {
-            varImg = img;
-            break;
-          }
+          if (keywords.some(kw => fn.includes(kw.toLowerCase()))) { varImg = img; break; }
         }
       }
-
-      // Priority 4: fall back to currently selected gallery image
-      if (!varImg) {
-        varImg = gallerySelected;
-      }
+      if (!varImg) varImg = gallerySelected;
 
       variants.push({
-        name,
-        sku: '',
-        regularPrice: price,
-        salePrice: '',
-        images: varImg ? [varImg] : [],
-        extras: [],
-        colorCode: '',
+        name, sku: '', regularPrice: price, salePrice: '',
+        images: varImg ? [varImg] : [], extras: [], colorCode: '',
       });
+    }
+
+    // Priority 2: gallery images with alt text starting with "Color:"
+    if (!variants.length) {
+      for (const [altName, imgUrl] of Object.entries(altMap)) {
+        if (seenVariantNames.has(altName)) continue;
+        seenVariantNames.add(altName);
+        variants.push({
+          name: altName, sku: '', regularPrice: price, salePrice: '',
+          images: [imgUrl], extras: [], colorCode: '',
+        });
+      }
+    }
+
+    // Priority 3: gallery images with shade codes in filenames
+    if (!variants.length) {
+      for (const [shadeKey, imgUrl] of Object.entries(shadeMap)) {
+        const name = shadeNameFromFilename(imgUrl) || shadeKey;
+        if (seenVariantNames.has(name)) continue;
+        seenVariantNames.add(name);
+        variants.push({
+          name, sku: '', regularPrice: price, salePrice: '',
+          images: [imgUrl], extras: [], colorCode: '',
+        });
+      }
     }
 
     if (!variants.length) throw new Error('No shade variants found');
 
-    // 10. Parent image = first variant's image, or first JSON-LD image
-    const parentImages = variants[0].images.length ? [variants[0].images[0]]
-      : (jsonImages.length ? [jsonImages[0]] : []);
+    // 9. Parent image = non-variant product shots (images without shade codes in filenames)
+    const parentImages = productImages.length
+      ? productImages.slice(0, 4)
+      : (variants[0].images.length ? [variants[0].images[0]] : (galleryImages.length ? [galleryImages[0]] : []));
 
     return { rows: variableRows(title, parentImages, description, '', categories, 'Color', variants), title };
   }
@@ -4394,7 +4451,7 @@
     { name: 'Macadamia Hair', domain: 'macadamiahair.com', key: 'macadamiahair', example: 'https://www.macadamiahair.com/products/healing-oil-spray' },
     { name: 'Cantu Shea Beauty', domain: 'cantubeauty.com', key: 'cantubeauty', example: 'https://www.cantubeauty.com/products/curls-coils-waves/coconut-curling-cream/' },
     { name: 'Taj Class', domain: 'tajclass.com', key: 'tajclass', example: 'https://tajclass.com/products/mascara-i-love-extreme-crazy-volume-essence' },
-    { name: 'Makeover Pakistan', domain: 'makeoverpakistan.com', key: 'makeoverpakistan', example: 'https://www.makeoverpakistan.com/shop/skin-liquid-foundation' },
+    { name: 'Makeover Pakistan', domain: 'makeoverpakistan.com', key: 'makeoverpakistan', example: 'https://www.makeoverpakistan.com/shop/high-perfection-foundation' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key] }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };

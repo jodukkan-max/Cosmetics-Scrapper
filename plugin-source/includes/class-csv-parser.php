@@ -234,7 +234,7 @@ class Rsi_Csv_Parser {
         if ($images === '') {
             return [];
         }
-        $urls = explode(',', $images);
+        $urls = explode('|', $images);
         return array_filter(array_map('trim', $urls));
     }
 

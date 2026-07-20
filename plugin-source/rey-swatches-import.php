@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('RSI_VERSION', '1.6.1');
+define('RSI_VERSION', '1.6.2');
 define('RSI_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('RSI_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('RSI_REST_NAMESPACE', 'scraper/v1');
