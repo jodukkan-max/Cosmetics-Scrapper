@@ -4158,6 +4158,10 @@
       // On saved HTML, src is a local path like ./site_files/UUID-N.1-Neutral.jpg
       if (src.startsWith('http')) {
         srcForGallery = src.split('?')[0];
+        // Replace small thumbnail size (w_150) with larger size (w_640)
+        if (srcForGallery.includes('cloudinary.com')) {
+          srcForGallery = srcForGallery.replace(/w_\d+/, 'w_640');
+        }
       } else {
         // Saved HTML — extract filename and match against JSON-LD images
         const localFn = src.split('/').pop().split('?')[0];
