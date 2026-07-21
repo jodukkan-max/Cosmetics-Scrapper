@@ -4473,6 +4473,50 @@
     return { rows: variableRows(title, parentImages.slice(0, 4), description, '', categories, 'Color', variants), title };
   }
 
+  // ── Care To Beauty simple product scraper ──────────────────────────────────
+  async function scrapeCaretoBeautySimple(ctx) {
+    const html = ctx.mainHtml;
+
+    const blocks = ldBlocks(html);
+    let ldProduct = null;
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(decodeEntities(raw));
+        const p = Array.isArray(j) ? j.find(x => x['@type'] === 'Product') : j;
+        if (p && p['@type'] === 'Product') { ldProduct = p; break; }
+      } catch (e) {}
+    }
+    if (!ldProduct) throw new Error('Product JSON-LD not found');
+
+    let title = decodeEntities(ldProduct.name || '');
+    let description = decodeEntities(ldProduct.description || '').replace(/\s+/g, ' ').trim();
+    let sku = ldProduct.sku || '';
+    let price = '';
+    if (ldProduct.offers && ldProduct.offers.price != null) {
+      const p = parseFloat(ldProduct.offers.price);
+      price = isFinite(p) ? p.toFixed(2) : '';
+    }
+
+    let categories = '';
+    if (ldProduct.category) {
+      const parts = ldProduct.category.split('>').map(c => c.trim()).filter(Boolean);
+      const skip = new Set(['health & beauty', 'personal care', 'cosmetics']);
+      const filtered = parts.filter(c => !skip.has(c.toLowerCase()));
+      categories = filtered.join(', ');
+    }
+
+    let images = [];
+    if (ldProduct.image) {
+      const imgs = Array.isArray(ldProduct.image) ? ldProduct.image : [ldProduct.image];
+      images = imgs.map(img => {
+        const raw = (typeof img === 'object' && img.url ? img.url : String(img));
+        return raw.split('?')[0].replace(/cdn-cgi\/image\/[^/]+\//, '');
+      }).filter(Boolean).slice(0, 4);
+    }
+
+    return { rows: simpleRow({ sku, name: title, description, price, categories, images }), title };
+  }
+
   // ── Notino (JSON-LD offers with colors from color-picker HTML) ──────
   // notino.co.uk embeds all variant data in a single JSON-LD Product block
   // with an offers array. Color hex codes live in the color-picker <a> links
@@ -4671,7 +4715,7 @@
     cantubeauty: { variable: scrapeCantubeautySimple, simple: scrapeCantubeautySimple },
     tajclass: { simple: scrapeTajclassSimple },
     makeoverpakistan: { variable: scrapeMakeoverPakistan },
-    caretobeauty: { variable: scrapeCaretoBeauty },
+    caretobeauty: { variable: scrapeCaretoBeauty, simple: scrapeCaretoBeautySimple },
     notino: { variable: scrapeNotino, simple: scrapeNotinoSimple },
   };
 
