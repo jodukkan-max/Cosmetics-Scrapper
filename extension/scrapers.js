@@ -4562,7 +4562,7 @@
       const offerImg = typeof o.image === 'string' ? o.image.split('?')[0].replace(/order_2k\//, 'detail_main_uhq/') : '';
 
       variants.push({
-        name: shade || o.name || '',
+        name: (shade || (o.name || '')).replace(title, '').replace(/^\s*shade\s+/i, '').replace(/\s+\d[\d.,]*\s*(?:g|ml|kg|l|oz|fl\.?\s*oz)\s*$/i, '').trim(),
         sku: o.sku || '',
         regularPrice: offerPrice,
         salePrice: '',
