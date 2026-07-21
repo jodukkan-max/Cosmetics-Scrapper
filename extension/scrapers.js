@@ -4026,7 +4026,7 @@
     let ldProduct = null;
     for (const raw of blocks) {
       try {
-        const j = JSON.parse(raw);
+        const j = JSON.parse(decodeEntities(raw));
         if (j['@type'] === 'Product') { ldProduct = j; break; }
       } catch (e) {}
     }
@@ -4112,7 +4112,7 @@
     let ldProduct = null;
     for (const raw of blocks) {
       try {
-        const j = JSON.parse(raw);
+        const j = JSON.parse(decodeEntities(raw));
         if (j['@type'] === 'Product') { ldProduct = j; break; }
       } catch (e) {}
     }
@@ -4485,7 +4485,7 @@
     let ldProduct = null;
     for (const raw of blocks) {
       try {
-        const j = JSON.parse(raw);
+        const j = JSON.parse(decodeEntities(raw));
         if (j['@type'] === 'Product') { ldProduct = j; break; }
       } catch (e) {}
     }
@@ -4585,7 +4585,7 @@
     let ldProduct = null;
     for (const raw of blocks) {
       try {
-        const j = JSON.parse(raw);
+        const j = JSON.parse(decodeEntities(raw));
         if (j['@type'] === 'Product') { ldProduct = j; break; }
       } catch (e) {}
     }
@@ -4616,7 +4616,7 @@
       }).filter(Boolean).slice(0, 4);
     }
 
-    return { rows: simpleRow({ sku, name: title, description, regularPrice: price, images }), title };
+    return { rows: simpleRow({ sku, name: title, description, price, images }), title };
   }
 
   // ── Dispatch ─────────────────────────────────────────────────────────────
