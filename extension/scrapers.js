@@ -4577,6 +4577,48 @@
     return { rows: variableRows(title, parentImages.slice(0, 4), description, '', '', 'Color', variants), title };
   }
 
+  // ── Notino simple product scraper ─────────────────────────────────────────
+  async function scrapeNotinoSimple(ctx) {
+    const html = ctx.mainHtml;
+
+    const blocks = ldBlocks(html);
+    let ldProduct = null;
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { ldProduct = j; break; }
+      } catch (e) {}
+    }
+    if (!ldProduct) throw new Error('Product JSON-LD not found');
+
+    let title = decodeEntities(ldProduct.name || '');
+    let description = decodeEntities(ldProduct.description || '');
+    description = description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    let sku = ldProduct.sku || '';
+    let price = '';
+    const offers = Array.isArray(ldProduct.offers) ? ldProduct.offers : [ldProduct.offers];
+    if (offers.length > 0) {
+      const o = offers[0];
+      sku = o.sku || sku;
+      if (o.price != null) {
+        const p = parseFloat(o.price);
+        price = isFinite(p) ? p.toFixed(2) : '';
+      }
+    }
+
+    let images = [];
+    if (ldProduct.image) {
+      const imgs = Array.isArray(ldProduct.image) ? ldProduct.image : [ldProduct.image];
+      images = imgs.map(img => {
+        const raw = (typeof img === 'object' && img.url ? img.url : String(img));
+        return raw.split('?')[0].replace(/order_2k\//, 'detail_main_uhq/');
+      }).filter(Boolean).slice(0, 4);
+    }
+
+    return { rows: simpleRow({ sku, name: title, description, regularPrice: price, images }), title };
+  }
+
   // ── Dispatch ─────────────────────────────────────────────────────────────
   const SCRAPERS = {
     nyx: { variable: scrapeNyx, simple: scrapeNyxSimple },
@@ -4630,7 +4672,7 @@
     tajclass: { simple: scrapeTajclassSimple },
     makeoverpakistan: { variable: scrapeMakeoverPakistan },
     caretobeauty: { variable: scrapeCaretoBeauty },
-    notino: { variable: scrapeNotino },
+    notino: { variable: scrapeNotino, simple: scrapeNotinoSimple },
   };
 
   // Detect site from a URL hostname.
