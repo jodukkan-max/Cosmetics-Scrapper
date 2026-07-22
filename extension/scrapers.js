@@ -4549,13 +4549,13 @@
     let description = decodeEntities(ldProduct.description || '');
     description = description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
-    // 4. Parent images from JSON-LD — prefer detail_main_uhq for highest quality
+    // 4. Parent images from JSON-LD — prefer detail_main_hq for highest quality
     let parentImages = [];
     if (ldProduct.image) {
       const imgs = Array.isArray(ldProduct.image) ? ldProduct.image : [ldProduct.image];
       parentImages = imgs.map(img => {
         const raw = (typeof img === 'object' && img.url ? img.url : String(img));
-        return raw.split('?')[0].replace(/order_2k\//, 'detail_main_uhq/');
+        return raw.split('?')[0].replace(/order_2k\//, 'detail_main_hq/');
       }).filter(Boolean);
     }
 
@@ -4602,8 +4602,8 @@
         offerPrice = isFinite(p) ? p.toFixed(2) : '';
       }
 
-      // Image — prefer detail_main_uhq for highest quality
-      const offerImg = typeof o.image === 'string' ? o.image.split('?')[0].replace(/order_2k\//, 'detail_main_uhq/') : '';
+      // Image — prefer detail_main_hq for highest quality
+      const offerImg = typeof o.image === 'string' ? o.image.split('?')[0].replace(/order_2k\//, 'detail_main_hq/') : '';
 
       variants.push({
         name: (shade || (o.name || '')).replace(title, '').replace(/^\s*shade\s+/i, '').replace(/\s+\d[\d.,]*\s*(?:g|ml|kg|l|oz|fl\.?\s*oz)\s*$/i, '').trim(),
@@ -4656,7 +4656,7 @@
       const imgs = Array.isArray(ldProduct.image) ? ldProduct.image : [ldProduct.image];
       images = imgs.map(img => {
         const raw = (typeof img === 'object' && img.url ? img.url : String(img));
-        return raw.split('?')[0].replace(/order_2k\//, 'detail_main_uhq/');
+        return raw.split('?')[0].replace(/order_2k\//, 'detail_main_hq/');
       }).filter(Boolean).slice(0, 4);
     }
 
