@@ -4529,7 +4529,7 @@
     let ldProduct = null;
     for (const raw of blocks) {
       try {
-        const j = JSON.parse(decodeEntities(raw));
+        const j = JSON.parse(raw);
         if (j['@type'] === 'Product') { ldProduct = j; break; }
       } catch (e) {}
     }
