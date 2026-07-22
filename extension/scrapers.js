@@ -102,7 +102,7 @@
         Images: v.images && v.images.length ? [v.images[0]] : [],
         'Rey Variations extra images': (v.extras && v.extras.length) ? v.extras : [],
         Description: '', 'Short Description': '', Categories: '',
-        'Regular Price': '15', 'Sale Price': '',
+        'Regular Price': v.regularPrice || '15', 'Sale Price': v.salePrice || '',
         'Attribute 1 name': optionName, 'Attribute 1 value(s)': v.name,
         'Attribute 1 visible': '', 'Attribute 1 global': '1', 'Color Code': v.colorCode || '',
       });
@@ -4518,11 +4518,8 @@
   }
 
   // ── Notino (JSON-LD offers with colors from color-picker HTML) ──────
-  // notino.co.uk embeds all variant data in a single JSON-LD Product block
-  // with an offers array. Color hex codes live in the color-picker <a> links
-  // as CSS custom properties: --c1k09ts5-2: #HEX.
   async function scrapeNotino(ctx) {
-    const html = ctx.mainHtml; const url = ctx.url;
+    const html = ctx.mainHtml;
 
     // 1. Parse JSON-LD
     const blocks = ldBlocks(html);
@@ -4535,32 +4532,24 @@
     }
     if (!ldProduct) throw new Error('Product JSON-LD not found');
 
-    // 2. Title — strip shade suffix from name
-    let title = decodeEntities(ldProduct.name || '');
-    // Name includes shade: "MAC Cosmetics MACximal Sleek Satin Lipstick Mini shade CENTRE OF ATTENTION 1.5 g"
-    // Strip "shade XXXX" and size suffix
-    title = title.replace(/\s+shade\s+[A-Za-z\s'-]+\s+\d[\d.]*\s*g?/i, '').trim();
-    // Also try: strip everything after the last dash-space-shade pattern
-    if (!title || title.length < 5) {
-      title = decodeEntities(ldProduct.name || '').split(' shade ')[0].trim();
-    }
+    // 2. Title
+    const title = decodeEntities(ldProduct.name || '');
 
     // 3. Description
     let description = decodeEntities(ldProduct.description || '');
     description = description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
-    // 4. Parent images from JSON-LD — prefer detail_main_hq for highest quality
+    // 4. Parent images — 4 main images from JSON-LD, replace order_2k with detail_main_hq
     let parentImages = [];
     if (ldProduct.image) {
       const imgs = Array.isArray(ldProduct.image) ? ldProduct.image : [ldProduct.image];
       parentImages = imgs.map(img => {
         const raw = (typeof img === 'object' && img.url ? img.url : String(img));
         return raw.split('?')[0].replace(/order_2k\//, 'detail_main_hq/');
-      }).filter(Boolean);
+      }).filter(Boolean).slice(0, 4);
     }
 
     // 5. Build color map from HTML color picker
-    // <a id="pd-variant-NNNNN" href=".../p-NNNNN/">...--c1k09ts5-2: #HEX...
     const pIdToColor = {};
     const pickerRe = /<a\s[^>]*id="pd-variant-(\d+)"[^>]*href="[^"]*\/p-(\d+)\/[^"]*"[^>]*>[\s\S]*?--c1k09ts5-2:\s*(#[A-Fa-f0-9]+)/g;
     let pm;
@@ -4570,7 +4559,7 @@
       if (!pIdToColor[pId]) pIdToColor[pId] = hex;
     }
 
-    // 6. Deduplicate offers by SKU and build variants
+    // 6. Deduplicate offers by SKU
     const offers = Array.isArray(ldProduct.offers) ? ldProduct.offers : [ldProduct.offers];
     const seen = new Map();
     for (const o of offers) {
@@ -4578,22 +4567,15 @@
     }
     const uniqueOffers = [...seen.values()];
 
+    // 7. Build variants
     const variants = [];
     for (const o of uniqueOffers) {
-      // Extract shade name from offer.name: "shade CENTRE OF ATTENTION 1.5 g"
-      let shade = '';
-      const shadeMatch = (o.name || '').match(/shade\s+([A-Za-z\s'-]+?)\s+\d/);
-      if (shadeMatch) shade = shadeMatch[1].trim();
-      // Fallback: extract from URL slug
-      if (!shade) {
-        const slug = (o.url || '').split('/').filter(Boolean).pop() || '';
-        const slugMatch = slug.match(/shade-([a-z0-9-]+)/);
-        if (slugMatch) shade = slugMatch[1].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-      }
-
-      // Extract p-XXXXX from offer URL to look up color
-      const pId = ((o.url || '').match(/\/p-(\d+)\//) || [])[1] || '';
-      const colorCode = pIdToColor[pId] || '';
+      // Clean variant name: remove "shade" prefix and weight/size suffix
+      // e.g. "Bourjois Brow Reveal shade 001 Blond 0.09 g" → "001 Blond"
+      let varName = (o.name || '');
+      varName = varName.replace(title, '').trim();                     // remove product title
+      varName = varName.replace(/^\s*shade\s+/i, '');                  // strip "shade " prefix
+      varName = varName.replace(/\s+\d[\d.,]*\s*(?:g|ml|kg|l|oz|fl\.?\s*oz)\s*$/i, '').trim(); // strip weight/volume
 
       // Price
       let offerPrice = '';
@@ -4602,12 +4584,16 @@
         offerPrice = isFinite(p) ? p.toFixed(2) : '';
       }
 
-      // Image — prefer detail_main_hq for highest quality
+      // Color code from HTML picker
+      const pId = ((o.url || '').match(/\/p-(\d+)\//) || [])[1] || '';
+      const colorCode = pIdToColor[pId] || '';
+
+      // Variant image
       const offerImg = typeof o.image === 'string' ? o.image.split('?')[0].replace(/order_2k\//, 'detail_main_hq/') : '';
 
       variants.push({
-        name: (shade || (o.name || '')).replace(title, '').replace(/^\s*shade\s+/i, '').replace(/\s+\d[\d.,]*\s*(?:g|ml|kg|l|oz|fl\.?\s*oz)\s*$/i, '').trim(),
-        sku: o.sku || '',
+        name: varName,
+        sku: '',
         regularPrice: offerPrice,
         salePrice: '',
         images: offerImg ? [offerImg] : [],
@@ -4618,49 +4604,7 @@
 
     if (!variants.length) throw new Error('No variants could be extracted');
 
-    return { rows: variableRows(title, parentImages.slice(0, 4), description, '', '', 'Color', variants), title };
-  }
-
-  // ── Notino simple product scraper ─────────────────────────────────────────
-  async function scrapeNotinoSimple(ctx) {
-    const html = ctx.mainHtml;
-
-    const blocks = ldBlocks(html);
-    let ldProduct = null;
-    for (const raw of blocks) {
-      try {
-        const j = JSON.parse(decodeEntities(raw));
-        if (j['@type'] === 'Product') { ldProduct = j; break; }
-      } catch (e) {}
-    }
-    if (!ldProduct) throw new Error('Product JSON-LD not found');
-
-    let title = decodeEntities(ldProduct.name || '');
-    let description = decodeEntities(ldProduct.description || '');
-    description = description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-
-    let sku = ldProduct.sku || '';
-    let price = '';
-    const offers = Array.isArray(ldProduct.offers) ? ldProduct.offers : [ldProduct.offers];
-    if (offers.length > 0) {
-      const o = offers[0];
-      sku = o.sku || sku;
-      if (o.price != null) {
-        const p = parseFloat(o.price);
-        price = isFinite(p) ? p.toFixed(2) : '';
-      }
-    }
-
-    let images = [];
-    if (ldProduct.image) {
-      const imgs = Array.isArray(ldProduct.image) ? ldProduct.image : [ldProduct.image];
-      images = imgs.map(img => {
-        const raw = (typeof img === 'object' && img.url ? img.url : String(img));
-        return raw.split('?')[0].replace(/order_2k\//, 'detail_main_hq/');
-      }).filter(Boolean).slice(0, 4);
-    }
-
-    return { rows: simpleRow({ sku, name: title, description, price, images }), title };
+    return { rows: variableRows(title, parentImages, description, '', '', 'Color', variants), title };
   }
 
   // ── Dispatch ─────────────────────────────────────────────────────────────
@@ -4716,7 +4660,7 @@
     tajclass: { simple: scrapeTajclassSimple },
     makeoverpakistan: { variable: scrapeMakeoverPakistan },
     caretobeauty: { variable: scrapeCaretoBeauty, simple: scrapeCaretoBeautySimple },
-    notino: { variable: scrapeNotino, simple: scrapeNotinoSimple },
+    notino: { variable: scrapeNotino },
   };
 
   // Detect site from a URL hostname.
