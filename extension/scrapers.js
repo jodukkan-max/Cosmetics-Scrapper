@@ -1266,6 +1266,75 @@
     return { rows: variableRows(title, parentImages, description, shortDesc, categories, isImageSwatch ? 'Image' : 'Color', variantsOut), title };
   }
 
+  // ── Maybelline South Africa (maybelline.co.za) ──────────────────────────────
+  async function scrapeMaybellineZA(ctx) {
+    const html = ctx.mainHtml; const domain = new URL(ctx.url).origin;
+    // Title: product__header-name + product__header-type, or h1.
+    const nameM = html.match(/<span class="product__header-name">([^<]+)<\/span>/);
+    const typeM = html.match(/<span class="product__header-type">([^<]+)<\/span>/);
+    let title = [nameM && nameM[1], typeM && typeM[1]].filter(Boolean).map(s => decodeEntities(s).trim()).join(' ').replace(/\s+/g, ' ').trim();
+    if (!title) title = decodeEntities(((html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/) || [])[1] || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    // Price: South African Rand format (R 299.95).
+    const price = ((html.match(/class="product__header-price"[^>]*>\s*R\s*([\d.]+)/) || [])[1] || '').replace(/[^\d.]/g, '');
+    // Description: meta description or first accordion item.
+    const aboutMatch = html.match(/showtext="About"[^>]*>([\s\S]*?)<\/accordion-item>/);
+    let description = aboutMatch ? decodeEntities(aboutMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()) : '';
+    if (!description) description = decodeEntities((html.match(/name="description"\s+content="([^"]+)"/) || [])[1] || '');
+    const categories = [...html.matchAll(/<span itemprop="name">\s*([^<]+)\s*<\/span>/g)]
+      .map(m => m[1].trim()).filter(c => c !== 'Home' && c !== 'Shop All').slice(0, -1).join(', ');
+
+    // Each shade is a li.shade-selector__item containing an input with data attributes.
+    const variants = []; const seenV = new Set();
+    for (const m of html.matchAll(/<input\b[^>]*\bdata-variant-id="[^"]*"[^>]*>/g)) {
+      const tag = m[0];
+      const get = a => { const mm = tag.match(new RegExp(a + '="([^"]*)"')); return mm ? mm[1] : ''; };
+      const variantId = get('data-variant-id'), displayName = get('data-display-name') || get('data-name'), color = get('data-color'), ean = get('data-variant-ean');
+      if (variantId && displayName && !seenV.has(variantId)) { seenV.add(variantId); variants.push({ variantId, displayName, color, ean }); }
+    }
+    if (!variants.length) throw new Error('No variants found on Maybelline ZA page.');
+
+    // Variant images via the same L'Oreal API.
+    const variantImages = {};
+    for (const v of variants) {
+      try {
+        const data = await ctx.fetchJson(`${domain}/loreal/product/variantimage`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ variantId: v.variantId, width: 1500, height: 1500 }),
+        });
+        variantImages[v.variantId] = (data.images && Array.isArray(data.images))
+          ? data.images.map(img => { const r = img[0]; const a = r.startsWith('http') ? r : domain + r; return a.replace(/([?&])(cx|cy|cw|ch|hash)=[^&]+/g, '').replace(/[?&]$/, ''); })
+          : [];
+      } catch (e) { variantImages[v.variantId] = []; }
+    }
+    // Parent images: first 4 unique from variant images, or gallery srcset fallback.
+    const baseCount = {};
+    for (const imgs of Object.values(variantImages)) { const seen = new Set(); for (const u of imgs) { const base = imgBaseName(u); if (!seen.has(base)) { seen.add(base); baseCount[base] = (baseCount[base] || 0) + 1; } } }
+    const shared = new Set(Object.keys(baseCount).filter(b => baseCount[b] >= 2));
+    const firstImgs = variantImages[variants[0].variantId] || []; const firstMain = firstImgs[0] || null;
+    const sharedImgs = []; const seenS = new Set();
+    for (const imgs of Object.values(variantImages)) for (const u of imgs) { const base = imgBaseName(u); if (shared.has(base) && !seenS.has(base)) { seenS.add(base); sharedImgs.push(u); } }
+    let parentImages = firstMain ? [firstMain, ...sharedImgs.filter(u => imgBaseName(u) !== imgBaseName(firstMain))] : sharedImgs;
+    // Fallback: gallery srcset images from the HTML.
+    if (!parentImages.length) {
+      parentImages = [...html.matchAll(/src(?:set)?="([^"]*?\/media\/project\/[^"]*?)"/g)].map(m => {
+        const raw = m[1].replace(/&amp;/g, '&').split('?')[0];
+        return (raw.startsWith('http') ? raw : (raw.startsWith('//') ? 'https:' + raw : domain + (raw.startsWith('/') ? raw : '/' + raw)));
+      }).filter(u => !/\/homepage\/|\/navigation\/|\/header\//i.test(u)).filter((v, i, a) => a.indexOf(v) === i).slice(0, 4);
+    }
+    parentImages = parentImages.slice(0, 4);
+
+    const variantsOut = variants.map(v => ({
+      name: v.displayName,
+      sku: '', // SKU kept empty as requested
+      regularPrice: price,
+      salePrice: '',
+      images: variantImages[v.variantId] || [],
+      extras: [],
+      colorCode: v.color ? '#' + v.color.toUpperCase() : '',
+    }));
+    return { rows: variableRows(title, parentImages, description, '', categories, 'Color', variantsOut), title };
+  }
+
   // ── Seventeen (Django/Oscar) ────────────────────────────────────────────────
   async function scrapeSeventeen(ctx) {
     const html = ctx.mainHtml; const domain = new URL(ctx.url).origin;
@@ -2041,6 +2110,77 @@
     const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
     const title = name || (h1 ? decodeEntities(h1[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()).replace(/^(.+?)\s+\1\b/, '$1').trim() : '');
     return { rows: simpleRow({ sku, name: title, description, categories, images: gallery }), title };
+  }
+
+  // ── My Loreal Paris (lorealparis.com.my, Sitecore, color = sibling pages) ────
+  function lorealMYParsePage(html, origin) {
+    let product = null, breadcrumb = null;
+    for (const raw of ldBlocks(html)) { try { const j = JSON.parse(raw); if (j['@type'] === 'Product' && !product) product = j; if (j['@type'] === 'BreadcrumbList') breadcrumb = j; } catch (e) {} }
+    const sku = (product && (product.sku || product.gtin13)) || '';
+    const description = decodeEntities(((product && product.description) || '').trim());
+    const price = product && product.offers && product.offers.price || '';
+    let mainImg = ''; const im = product && product.image;
+    if (typeof im === 'string') { const u = im.match(/https?:\/\/[^"\s,]+/); mainImg = u ? u[0].split('?')[0] : ''; }
+    else if (Array.isArray(im)) { const f = im[0]; mainImg = (typeof f === 'string' ? f : (f && f.url) || '').split('?')[0]; }
+    const seen = new Set(); const gallery = [];
+    if (mainImg) { seen.add(mainImg.split('?')[0]); gallery.push(mainImg.split('?')[0]); }
+    // Gallery: find product images only (local-products path), filter by product slug.
+    for (const m of html.matchAll(/\/-\/media\/project\/loreal\/brand-sites\/oap\/apac\/my\/local-products[^"\s,]*?\.(?:png|jpg|jpeg|webp)/gi)) {
+      const abs = origin + m[0].split('?')[0]; if (!seen.has(abs)) { seen.add(abs); gallery.push(abs); }
+    }
+    let categories = '';
+    if (breadcrumb) { const names = (breadcrumb.itemListElement || []).map(i => i.name || (i.item && i.item.name)).filter(Boolean).filter(n => n.toLowerCase() !== 'home'); categories = names.slice(0, -1).join('>'); }
+    const name = decodeEntities(((product && product.name) || '').trim());
+    return { sku, name, description, price, gallery, categories };
+  }
+  async function scrapeMyLorealParis(ctx) {
+    const html = ctx.mainHtml; const origin = new URL(ctx.url).origin;
+    const parsed = lorealMYParsePage(html, origin);
+    const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
+    // Prefer the H1 (full product name) over the truncated JSON-LD name.
+    const h1Title = h1 ? decodeEntities(h1[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()) : '';
+    const title = (h1Title && h1Title.length >= parsed.name.length) ? h1Title : (parsed.name || h1Title);
+    const { description, categories } = parsed;
+
+    // If the current page already has colorItem shades in the HTML, use them directly.
+    // Otherwise fall back to the <noscript> variant listing.
+    const variantsMeta = []; const seenUrl = new Set();
+    for (const m of html.matchAll(/<li class="[^"]*colorItem[^"]*"[^>]*>([\s\S]*?)<\/li>/gi)) {
+      const block = m[1];
+      const href = (block.match(/href="([^"]+)"/) || [])[1] || '';
+      const aria = decodeEntities((block.match(/aria-label="([^"]*)"/) || [])[1] || '');
+      const name = ((aria.match(/\bin\s+(.+)$/i) || [])[1] || aria).trim();
+      const hex = (block.match(/fill="(#[0-9A-Fa-f]{3,6})"/i) || [])[1] || '';
+      if (!href || !name || seenUrl.has(href)) continue;
+      seenUrl.add(href);
+      variantsMeta.push({ name, hex, url: href.startsWith('http') ? href : origin + href });
+    }
+
+    // Fallback: parse <noscript> block for variant links.
+    if (!variantsMeta.length) {
+      const noscriptM = html.match(/<noscript>\s*(<ul>\s*<li>[\s\S]*?<\/ul>)\s*<\/noscript>/);
+      if (!noscriptM) throw new Error('No variants found on My Loreal Paris page.');
+      for (const m of noscriptM[1].matchAll(/<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g)) {
+        const href = m[1]; let name = m[2].trim();
+        // Name format: "Brow Artist Designer Pro 02 Chestnut Brown - 02 Chestnut Brown"
+        // Extract just the shade name after the dash.
+        const dashIdx = name.lastIndexOf(' - ');
+        if (dashIdx >= 0) name = name.slice(dashIdx + 3).trim();
+        if (!href || !name || seenUrl.has(href)) continue;
+        seenUrl.add(href);
+        variantsMeta.push({ name, hex: '', url: href.startsWith('http') ? href : origin + href });
+      }
+    }
+    if (!variantsMeta.length) throw new Error('No color variants on My Loreal Paris page.');
+
+    const norm = u => u.replace(/\/$/, '');
+    const pages = [];
+    for (const v of variantsMeta) {
+      const pageHtml = norm(v.url) === norm(ctx.url) ? html : await ctx.fetchText(v.url);
+      pages.push(Object.assign({}, lorealMYParsePage(pageHtml, origin), v));
+    }
+    const variants = pages.map(p => ({ name: p.name, sku: p.sku || '', regularPrice: '', salePrice: '', images: p.gallery, extras: p.gallery.slice(1, 3), colorCode: p.hex }));
+    return { rows: variableRows(title, pages[0] ? pages[0].gallery : [], description, '', categories, 'Color', variants), title };
   }
 
   // ── Vichy (Sitecore, single Size variation) ─────────────────────────────────
@@ -4617,10 +4757,12 @@
     inglot: { variable: scrapeInglot, simple: scrapeInglotSimple },
     flormar: { variable: scrapeFlormar, simple: scrapeFlormarSimple },
     maybelline: { variable: scrapeMaybelline, simple: scrapeMaybelline },
+    maybellineza: { variable: scrapeMaybellineZA },
     seventeen: { variable: scrapeSeventeen, simple: scrapeSeventeenSimple },
     isadora: { variable: scrapeIsadora, simple: scrapeIsadoraSimple },
     topface: { variable: scrapeTopface, simple: scrapeTopfaceSimple },
     lorealparis: { variable: scrapeLorealParis, simple: scrapeLorealParisSimple },
+    mylorealparis: { variable: scrapeMyLorealParis },
     vichy: { variable: scrapeVichy, simple: scrapeVichy },
     larocheposay: { variable: scrapeLarocheposay, simple: scrapeLarocheposay },
     urbancare: { variable: scrapeUrbancareSimple, simple: scrapeUrbancareSimple },
@@ -4669,7 +4811,7 @@
       const h = new URL(url).hostname.replace(/^www\./, '');
       const map = {
         'nyxcosmetics.com': 'nyx', 'elfcosmetics.com': 'elf', 'maybelline.com': 'maybelline', 'hudabeauty.com': 'huda',
-        'flormar.com': 'flormar', 'lorealparisusa.com': 'lorealparis', 'vichy-me.com': 'vichy',
+        'flormar.com': 'flormar', 'lorealparisusa.com': 'lorealparis', 'lorealparis.com.my': 'mylorealparis', 'vichy-me.com': 'vichy',
         'pastelarabia.com': 'pastel', 'laroche-posay.us': 'larocheposay', 'urbancare.ro': 'urbancare',
         'bielenda.pl': 'bielenda', 'sephora.com': 'sephora', 'cerave.com': 'cerave',
         'narscosmetics.com': 'nars', 'glowrecipe.com': 'glowrecipe',         'seventeencosmetics.com': 'seventeen',
@@ -4704,6 +4846,7 @@
         'makeoverpakistan.com': 'makeoverpakistan',
         'caretobeauty.com': 'caretobeauty',
         'notino.co.uk': 'notino',
+        'maybelline.co.za': 'maybellineza',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -4729,8 +4872,10 @@
     { name: 'Glow Recipe', domain: 'glowrecipe.com', key: 'glowrecipe' },
     { name: 'Inglot', domain: 'inglotcosmetics.com', key: 'inglot' },
     { name: 'Maybelline', domain: 'maybelline.com', key: 'maybelline', discover: true, example: 'https://www.maybelline.com/face-makeup/foundation-makeup/fit-me-matte-poreless-foundation?variant=334' },
+    { name: 'Maybelline SA', domain: 'maybelline.co.za', key: 'maybellineza', discover: false },
     { name: 'Flormar', domain: 'flormar.com', key: 'flormar', example: 'https://www.flormar.com/perfect-coverage-liquid-concealer--ivory-002/' },
     { name: "L'Oréal Paris", domain: 'lorealparisusa.com', key: 'lorealparis', example: 'https://www.lorealparisusa.com/makeup/face/concealer/true-match-radiant-serum-concealer' },
+    { name: 'My Loreal Paris', domain: 'lorealparis.com.my', key: 'mylorealparis', discover: false },
     { name: 'Vichy', domain: 'vichy-me.com', key: 'vichy' },
     { name: 'La Roche-Posay', domain: 'laroche-posay.us', key: 'larocheposay' },
     { name: 'Urban Care', domain: 'urbancare.ro', key: 'urbancare' },
