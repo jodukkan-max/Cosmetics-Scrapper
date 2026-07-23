@@ -2087,7 +2087,8 @@
       const block = m[1];
       const href = (block.match(/href="([^"]+)"/) || [])[1] || '';
       const aria = decodeEntities((block.match(/aria-label="([^"]*)"/) || [])[1] || '');
-      const name = ((aria.match(/\bin\s+(.+)$/i) || [])[1] || aria).trim();
+      const lastIn = aria.lastIndexOf(' in ');
+      const name = lastIn >= 0 ? aria.slice(lastIn + 4).trim() : aria;
       const hex = (block.match(/fill="(#[0-9A-Fa-f]{3,6})"/i) || [])[1] || '';
       if (!href || !name || seenUrl.has(href)) continue;
       seenUrl.add(href);
@@ -2149,7 +2150,8 @@
       const block = m[1];
       const href = (block.match(/href="([^"]+)"/) || [])[1] || '';
       const aria = decodeEntities((block.match(/aria-label="([^"]*)"/) || [])[1] || '');
-      const name = ((aria.match(/\bin\s+(.+)$/i) || [])[1] || aria).trim();
+      const lastIn = aria.lastIndexOf(' in ');
+      const name = lastIn >= 0 ? aria.slice(lastIn + 4).trim() : aria;
       const hex = (block.match(/fill="(#[0-9A-Fa-f]{3,6})"/i) || [])[1] || '';
       if (!href || !name || seenUrl.has(href)) continue;
       seenUrl.add(href);
@@ -4508,13 +4510,15 @@
 
     // 5. Parse variant options from data-props (works for both color and non-color variants)
     // Color products: label="Colors", with box-color swatches for hex codes
-    // Non-color products: label="Shades" (or other), no hex codes
+    // Non-color products: label="Sizes", "Volume", etc., no hex codes
     const variantOptions = []; // { value (URL), name (cleaned) }
+    let variantLabel = 'Variant'; // captured from data-props, e.g. "Colors", "Sizes"
     const propsMatches = [...html.matchAll(/data-props="([^"]+)"/g)];
     for (const pm of propsMatches) {
       try {
         const d = JSON.parse(pm[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
         if (d.options && d.label) {
+          variantLabel = d.label; // capture label for attribute name (e.g. "Colors", "Sizes")
           for (const opt of d.options) {
             if (!opt.value || !opt.name) continue;
             if (/^view all/i.test(opt.name)) continue; // skip "View All Options"
@@ -4539,6 +4543,11 @@
       hexByUrl[sm[1].trim()] = sm[2].trim();
     }
 
+    // 7. Determine attribute name dynamically
+    //    If color swatches are present → "Color", otherwise use the data-props label.
+    const hexCount = Object.keys(hexByUrl).length;
+    const attrName = hexCount > 0 ? 'Color' : (variantLabel || 'Variant');
+
     // URL → name fallback for shade names not captured in data-props
     function shadeNameFromUrl(u) {
       let slug = u.replace(/\/+$/, '').split('/').pop().replace(/-new$/, '');
@@ -4547,7 +4556,7 @@
       return '';
     }
 
-    // 7. Fetch each variant's own page for SKU, price, and image
+    // 8. Fetch each variant's own page for SKU, price, and image
     const variants = [];
     for (let i = 0; i < variantOptions.length; i++) {
       const { url: varUrl, name: optName } = variantOptions[i];
@@ -4599,7 +4608,7 @@
 
     if (!variants.length) throw new Error('No variants could be extracted');
 
-    // 8. Parent images from current page's JSON-LD product gallery
+    // 9. Parent images from current page's JSON-LD product gallery
     let parentImages = [];
     if (ldProduct.image) {
       const imgs = Array.isArray(ldProduct.image) ? ldProduct.image : [ldProduct.image];
@@ -4610,7 +4619,7 @@
       });
     }
 
-    return { rows: variableRows(title, parentImages.slice(0, 4), description, '', categories, 'Color', variants), title };
+    return { rows: variableRows(title, parentImages.slice(0, 4), description, '', categories, attrName, variants), title };
   }
 
   // ── Care To Beauty simple product scraper ──────────────────────────────────
@@ -4689,7 +4698,7 @@
       }).filter(Boolean).slice(0, 4);
     }
 
-    // 5. Build color map from HTML color picker
+    // 5. Build color map from HTML color picker AND determine if color product
     const pIdToColor = {};
     const pickerRe = /<a\s[^>]*id="pd-variant-(\d+)"[^>]*href="[^"]*\/p-(\d+)\/[^"]*"[^>]*>[\s\S]*?--c1k09ts5-2:\s*(#[A-Fa-f0-9]+)/g;
     let pm;
@@ -4698,6 +4707,7 @@
       const hex = pm[3].toUpperCase();
       if (!pIdToColor[pId]) pIdToColor[pId] = hex;
     }
+    const isColorProduct = Object.keys(pIdToColor).length > 0; // true if hex swatches exist
 
     // 6. Deduplicate offers by SKU
     const offers = Array.isArray(ldProduct.offers) ? ldProduct.offers : [ldProduct.offers];
@@ -4710,12 +4720,15 @@
     // 7. Build variants
     const variants = [];
     for (const o of uniqueOffers) {
-      // Clean variant name: remove "shade" prefix and weight/size suffix
-      // e.g. "Bourjois Brow Reveal shade 001 Blond 0.09 g" → "001 Blond"
+      // Clean variant name: remove product title, then optionally strip shade prefix
       let varName = (o.name || '');
       varName = varName.replace(title, '').trim();                     // remove product title
       varName = varName.replace(/^\s*shade\s+/i, '');                  // strip "shade " prefix
-      varName = varName.replace(/\s+\d[\d.,]*\s*(?:g|ml|kg|l|oz|fl\.?\s*oz)\s*$/i, '').trim(); // strip weight/volume
+      // For color products, strip weight/volume suffix (e.g. "001 Blond 0.09 g" → "001 Blond").
+      // For non-color products (size/packaging), KEEP the size text (e.g. "473 ml" stays as "473 ml").
+      if (isColorProduct) {
+        varName = varName.replace(/\s+\d[\d.,]*\s*(?:g|ml|kg|l|oz|fl\.?\s*oz)\s*$/i, '').trim();
+      }
 
       // Price
       let offerPrice = '';
@@ -4744,7 +4757,53 @@
 
     if (!variants.length) throw new Error('No variants could be extracted');
 
-    return { rows: variableRows(title, parentImages, description, '', '', 'Color', variants), title };
+    return { rows: variableRows(title, parentImages, description, '', '', isColorProduct ? 'Color' : 'Size', variants), title };
+  }
+
+  // ── Notino Simple ────────────────────────────────────────────────────────────
+  async function scrapeNotinoSimple(ctx) {
+    const html = ctx.mainHtml;
+
+    // 1. Parse JSON-LD
+    const blocks = ldBlocks(html);
+    let ldProduct = null;
+    for (const raw of blocks) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { ldProduct = j; break; }
+      } catch (e) {}
+    }
+    if (!ldProduct) throw new Error('Product JSON-LD not found');
+
+    // 2. Title
+    const title = decodeEntities(ldProduct.name || '');
+
+    // 3. Description — strip HTML tags
+    let description = decodeEntities(ldProduct.description || '');
+    description = description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    // 4. Get 4 main images from JSON-LD, replace order_2k with detail_main_hq
+    let images = [];
+    if (ldProduct.image) {
+      const imgs = Array.isArray(ldProduct.image) ? ldProduct.image : [ldProduct.image];
+      images = imgs.map(img => {
+        const raw = (typeof img === 'object' && img.url ? img.url : String(img));
+        return raw.split('?')[0].replace(/order_2k\//, 'detail_main_hq/');
+      }).filter(Boolean).slice(0, 4);
+    }
+
+    // 5. Price — use first offer's price
+    const offers = Array.isArray(ldProduct.offers) ? ldProduct.offers : [ldProduct.offers];
+    let price = '15';
+    if (offers.length && offers[0].price != null) {
+      const p = parseFloat(offers[0].price);
+      if (isFinite(p)) price = p.toFixed(2);
+    }
+
+    // 6. SKU — kept empty
+    const sku = '';
+
+    return { rows: simpleRow({ sku, name: title, description, price, images }), title };
   }
 
   // ── Dispatch ─────────────────────────────────────────────────────────────
@@ -4802,7 +4861,7 @@
     tajclass: { simple: scrapeTajclassSimple },
     makeoverpakistan: { variable: scrapeMakeoverPakistan },
     caretobeauty: { variable: scrapeCaretoBeauty, simple: scrapeCaretoBeautySimple },
-    notino: { variable: scrapeNotino },
+    notino: { variable: scrapeNotino, simple: scrapeNotinoSimple },
   };
 
   // Detect site from a URL hostname.

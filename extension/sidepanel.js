@@ -217,6 +217,8 @@ function buildReySwatches(parentRow, rows) {
       : { name: colorName, rey_attribute_color: cc || '#000000' };
   }
   if (isImageSwatch) return JSON.stringify({ Image: { name: 'Image', type: 'rey_image', terms } });
+  // Only generate color swatches when the attribute is "Color"
+  if (attrName.toLowerCase() !== 'color') return '';
   return JSON.stringify({ [attrName]: { name: attrName, type: 'rey_color', terms } });
 }
 
