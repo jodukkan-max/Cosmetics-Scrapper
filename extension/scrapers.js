@@ -116,6 +116,7 @@
     }];
   }
 
+
   // ── e.l.f. (Shopify Storefront) ─────────────────────────────────────────────
   const ELF_QUERY = `query Product($handle:String!){product(handle:$handle){title description options{name values} images(first:100){nodes{url altText}} variants(first:100){nodes{id sku price{amount} compareAtPrice{amount} selectedOptions{name value} image{url altText} availableForSale}} metafield(namespace:"custom",key:"short_description"){value}}}`;
   // The page's Storefront `images` are one-swatch-per-variant, not the real product
@@ -2267,6 +2268,105 @@
     return { rows: simpleRow({ sku, name: title, description, regularPrice: regular, salePrice: sale, categories, images }), title };
   }
 
+  // ── Urban Care TR (Shopify) ─────────────────────────────────────────────────
+  async function scrapeUrbancareTrSimple(ctx) {
+    const html = ctx.mainHtml;
+    let product = null;
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { product = j; break; }
+      } catch (e) {}
+    }
+    let title = (product && product.name) || '';
+    let description = (product && product.description) ? decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()) : '';
+
+    const sku = '';
+    const price = '15';
+    const category = (product && product.category) || '';
+    let images = [];
+    const mediaMatch = html.match(/<media-gallery[\s\S]*?<\/media-gallery>/i);
+    if (mediaMatch) {
+      images = [...mediaMatch[0].matchAll(/<img[^>]*src="([^"]+)"[^>]*>/gi)]
+        .map(m => m[1])
+        .filter(Boolean);
+    }
+    if (!images.length && product && product.image) {
+      images = [product.image].filter(Boolean);
+    }
+    images = [...new Set(images.map(u => u.replace(/^\/\//, 'https://').split('?')[0]))].slice(0, 5);
+    return { rows: simpleRow({ sku, name: title, description, categories: category, images, price }), title };
+  }
+
+  // ── Urban Care CL (Shopify, cliqat.com) ─────────────────────────────────────
+  async function scrapeUrbancareClSimple(ctx) {
+    const html = ctx.mainHtml;
+    let product = null;
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { product = j; break; }
+      } catch (e) {}
+    }
+    const title = (product && product.name) || '';
+    const description = (product && product.description) ? decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()) : '';
+    const sku = '';
+    const price = '15';
+    const category = (product && product.category) || '';
+    let images = [];
+    const mediaMatch = html.match(/<media-gallery[\s\S]*?<\/media-gallery>/i);
+    if (mediaMatch) {
+      images = [...mediaMatch[0].matchAll(/<img[^>]*src="([^"]+)"[^>]*>/gi)]
+        .map(m => m[1])
+        .filter(Boolean);
+    }
+    if (!images.length && product && product.image) {
+      images = [product.image].filter(Boolean);
+    }
+    images = [...new Set(images.map(u => u.replace(/^\/\//, 'https://').split('?')[0]))].slice(0, 5);
+    return { rows: simpleRow({ sku, name: title, description, categories: category, images, price }), title };
+  }
+
+  // ── Urban Care S (React SPA, makeupstore.com) ───────────────────────────────
+  async function scrapeUrbancareSSimple(ctx) {
+    const html = ctx.mainHtml;
+    // Extract product data from embedded dehydration JSON
+    let prodData = null;
+    const qm = html.match(/__staticQueryClientHydrationData\s*=\s*(\{[\s\S]*?\n\s*\});/);
+    if (qm) {
+      try {
+        const hydration = JSON.parse(qm[1]);
+        const queries = hydration.queries || [];
+        for (const q of queries) {
+          const d = q.state && q.state.data;
+          if (d && d.product_id && d.brand) { prodData = d; break; }
+        }
+      } catch (e) { /* fall through to HTML selectors */ }
+    }
+    const title = prodData ? (prodData.meta && prodData.meta.title && prodData.meta.title.split(' - ')[0].trim()) || prodData.meta?.title || '' : '';
+    const description = (() => {
+      if (prodData && prodData.characteristics) {
+        const features = prodData.characteristics.find(c => c.title === 'Description');
+        if (features && features.text) return decodeEntities(features.text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+      }
+      // Fallback: extract from HTML
+      const dm = html.match(/product__description[^>]*>([\s\S]*?)<\/div>/);
+      return dm ? decodeEntities(dm[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()) : '';
+    })();
+    const sku = '';
+    const price = '15';
+    const categories = (prodData && prodData.analytics && prodData.analytics.parent_category) || '';
+    // Images from Swiper gallery (source srcset)
+    let images = [...new Set(
+      [...html.matchAll(/<source\s[^>]*srcset="(https:\/\/us-i\.makeupstore\.com\/[^"]+\.jpg)[^"]*"/g)]
+        .map(m => m[1])
+    )].slice(0, 5);
+    if (!images.length && prodData && prodData.meta && prodData.meta.image) {
+      images = [prodData.meta.image];
+    }
+    return { rows: simpleRow({ sku, name: title || (prodData && prodData.name) || '', description, categories, images, price }), title: title || '' };
+  }
+
   // ── Bielenda (catalog) ──────────────────────────────────────────────────────
   async function scrapeBielendaSimple(ctx) {
     const html = ctx.mainHtml;
@@ -3127,9 +3227,223 @@
     }
 
     // Deduplicate (strip WordPress size suffixes e.g. -300x300)
-    images = [...new Set(images.map(u => u.replace(/-\d+x\d+(?=\.(?:png|jpg|jpeg|webp)$)/i, '')))].slice(0, 10);
+    images = [...new Set(images.map(u => u.replace(/-\d+x\d+(?=\.(?:png|jpg|jpeg|webp)$)/i, '')))].slice(0, 1);
 
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
+  // ── Sarah K International (WooCommerce/Elementor) ──────────────────────────
+  async function scrapeSarakhIntlSimple(ctx) {
+    const html = ctx.mainHtml;
+    // Title: h1.product_title (may contain GTranslate <font> wrappers)
+    const h1Match = html.match(/<h1[^>]*class="[^"]*product_title[^"]*"[^>]*>([\s\S]*?)<\/h1>/i);
+    const title = h1Match ? decodeEntities(h1Match[1].replace(/<[^>]+>/g, '').trim()) : '';
+    // Description: short-description div
+    const sdMatch = html.match(/woocommerce-product-details__short-description[^>]*>([\s\S]*?)<\/div>/i);
+    let description = sdMatch ? decodeEntities(sdMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()) : '';
+    // Categories: from posted_in links
+    const catMatch = html.match(/posted_in[^>]*>([\s\S]*?)<\/span>/i);
+    let categories = '';
+    if (catMatch) {
+      categories = [...catMatch[1].matchAll(/<a\b[^>]*>([^<]+)<\/a>/gi)]
+        .map(m => decodeEntities(m[1].trim())).join(' > ');
+    }
+    // Image: wp-post-image data-large_image
+    let images = [];
+    const imgMatch = html.match(/wp-post-image[^>]*data-large_image="([^"]+)"/i)
+      || html.match(/wp-post-image[^>]*data-src="([^"]+)"/i);
+    if (imgMatch) images = [imgMatch[1]];
+    return { rows: simpleRow({ sku: '', name: title, description, categories, images, price: '' }), title };
+  }
+
+  // ── Sarah K Store (WooCommerce/JSON-LD, sarahkstore.com) ───────────────────
+  async function scrapeSarakhStoreSimple(ctx) {
+    const html = ctx.mainHtml;
+    // JSON-LD product data (may be inside @graph array)
+    let product = null;
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { product = j; break; }
+        if (j['@graph']) {
+          const p = j['@graph'].find(item => item['@type'] === 'Product');
+          if (p) { product = p; break; }
+        }
+      } catch (e) {}
+    }
+    const title = (product && product.name) ? decodeEntities(product.name) : '';
+    const sku = (product && product.sku) || '';
+    const price = (product && product.offers && product.offers[0] && product.offers[0].priceSpecification && product.offers[0].priceSpecification[0] && product.offers[0].priceSpecification[0].price) || '';
+    let description = '';
+    if (product && product.description) {
+      description = decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+    // Categories: from posted_in links
+    const catMatch = html.match(/posted_in[^>]*>([\s\S]*?)<\/span>/i);
+    let categories = '';
+    if (catMatch) {
+      categories = [...catMatch[1].matchAll(/<a\b[^>]*>([^<]+)<\/a>/gi)]
+        .map(m => decodeEntities(m[1].trim())).join(' > ');
+    }
+    // Images: from wp-post-image data-large_image, fall back to JSON-LD
+    let images = [];
+    const imgMatch = html.match(/wp-post-image[^>]*data-large_image="([^"]+)"/i)
+      || html.match(/wp-post-image[^>]*data-src="([^"]+)"/i);
+    if (imgMatch) images = [imgMatch[1]];
+    if (!images.length && product && product.image) {
+      images = [product.image].filter(Boolean);
+    }
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
+  // ── SVR 1 (Easypara — Magento 2, JSON-LD + fotorama gallery) ─────────────
+  async function scrapeSvr1Simple(ctx) {
+    const html = ctx.mainHtml;
+    // JSON-LD Product
+    let product = null;
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { product = j; break; }
+      } catch (e) {}
+    }
+    const title = (product && product.name) ? decodeEntities(product.name) : '';
+    const sku = (product && product.sku) || '';
+    const price = (product && product.offers && product.offers.price != null) ? String(product.offers.price) : '';
+    let description = '';
+    if (product && product.description) {
+      description = decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+    // Categories from breadcrumb JSON-LD
+    let categories = '';
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'BreadcrumbList') {
+          categories = (j.itemListElement || [])
+            .filter(i => i.position < j.itemListElement.length)
+            .map(i => decodeEntities(i.item.name))
+            .join(' > ');
+          break;
+        }
+      } catch (e) {}
+    }
+    // Images from fotorama stage frames — strip query params for clean URLs
+    let images = [];
+    const frameMatches = [...html.matchAll(/class="fotorama__stage__frame[^"]*"[^>]*href="(https?:\/\/(?:www\.)?easypara\.com\/media\/catalog\/product\/[^?"]+)/gi)];
+    if (frameMatches.length) {
+      images = frameMatches.map(m => m[1].split('?')[0]);
+    }
+    if (!images.length && product && product.image) {
+      images = [product.image.split('?')[0]];
+    }
+    images = [...new Set(images)].slice(0, 5);
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
+  // ── Olaplex (Shopify, JSON-LD, olaplex.com) ────────────────────────────────
+  async function scrapeOlaplexSimple(ctx) {
+    const html = ctx.mainHtml;
+    let product = null;
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product') { product = j; break; }
+      } catch (e) {}
+    }
+    const title = (product && product.name) ? decodeEntities(product.name) : '';
+    // No SKU and no price per user request
+    let description = '';
+    if (product && product.description) {
+      description = decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+    // Categories from ShopifyAnalytics or GTM context
+    let categories = '';
+    const gtmMatch = html.match(/__GTM_CONTEXT__[^}]*item_category2"?\s*:\s*"([^"]+)"/);
+    if (gtmMatch) categories = gtmMatch[1];
+    if (!categories) {
+      const typeMatch = html.match(/ShopifyAnalytics\.meta\.product\.type"?\s*:\s*"([^"]+)"/);
+      if (typeMatch) categories = typeMatch[1];
+    }
+    // Images: from product gallery <a href> links (full or protocol-relative URLs)
+    let images = [];
+    const galleryMatches = [...html.matchAll(/<a\b[^>]*href="((?:https?:)?\/\/olaplex\.com\/cdn\/shop\/files\/[^"]+\.(?:jpg|png|jpeg|webp)[^"]*)"[^>]*aria-label="View full-size image/gi)];
+    if (galleryMatches.length) {
+      images = [...new Set(galleryMatches.map(m => (m[1].startsWith('http') ? m[1] : 'https:' + m[1]).split('?')[0]))].slice(0, 5);
+    }
+    // Fallback: scan all CDN URLs, exclude favicons/logos/navigation, dedupe to 5
+    if (!images.length) {
+      const allMatches = [...html.matchAll(/((?:https?:)?\/\/olaplex\.com\/cdn\/shop\/files\/[^"'\s,\\)]+\.(?:jpg|png|jpeg|webp))/gi)];
+      images = [...new Set(allMatches.map(m => {
+        let u = m[1]; if (!u.startsWith('http')) u = 'https:' + u; return u.split('?')[0];
+      }))].filter(u => !/Favicon|Navigation|logo/i.test(u)).slice(0, 5);
+    }
+    if (!images.length && product && product.image) {
+      images = [product.image.split('?')[0]];
+    }
+
+    return { rows: simpleRow({ sku: '', name: title, description, categories, images, price: '' }), title };
+  }
+
+  // ── Olaplex variable product (Shopify AJAX API, olaplex.com) ────────────────
+  async function scrapeOlaplexVariable(ctx) {
+    const html = ctx.mainHtml;
+    const u = new URL(ctx.url);
+    const handle = u.pathname.replace(/.*\/products\//, '').replace(/\/$/, '').split('?')[0];
+
+    const product = (await ctx.fetchJson(`${u.origin}/products/${handle}.json`)).product;
+    if (!product || !product.variants || !product.variants.length) throw new Error('Could not load Olaplex product JSON.');
+
+    const title = product.title ? decodeEntities(product.title) : '';
+    const description = shopifyBodyText(product);
+
+    // Categories from GTM context or ShopifyAnalytics or product type
+    let categories = '';
+    const gtmBlock = html.match(/__GTM_CONTEXT__\s*=\s*(\{[\s\S]*?\n\s*\});/);
+    if (gtmBlock) {
+      const catMatch = gtmBlock[1].match(/item_category2["\s:]+(["']?)([^"',\n}]+)\1/);
+      if (catMatch) categories = catMatch[2].trim();
+    }
+    if (!categories) {
+      const typeMatch = html.match(/ShopifyAnalytics\.meta\.product\.type"?\s*:\s*"([^"]+)"/);
+      if (typeMatch) categories = typeMatch[1];
+    }
+    if (!categories) categories = product.product_type || '';
+
+    // Parent images: from gallery <a> tags with aria-label="View full-size image"
+    let parentImages = [];
+    const galleryMatches = [...html.matchAll(/<a\b[^>]*href="((?:https?:)?\/\/olaplex\.com\/cdn\/shop\/files\/[^"]+\.(?:jpg|png|jpeg|webp)[^"]*)"[^>]*aria-label="View full-size image/gi)];
+    if (galleryMatches.length) {
+      parentImages = [...new Set(galleryMatches.map(m => (m[1].startsWith('http') ? m[1] : 'https:' + m[1]).split('?')[0]))].slice(0, 4);
+    }
+    if (!parentImages.length && product.images && product.images.length) {
+      parentImages = product.images.slice(0, 4).map(im => normalizeShopUrl(im.src));
+    }
+
+    // Build variants from Shopify JSON
+    const allImages = (product.images || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
+    const imgById = new Map(allImages.map(im => [im.id, normalizeShopUrl(im.src)]));
+
+    const variants = product.variants.map(v => {
+      const price = fmtPrice(v.price);
+      const compareAt = v.compare_at_price && parseFloat(v.compare_at_price) > 0 ? fmtPrice(v.compare_at_price) : '';
+      const main = v.featured_image ? normalizeShopUrl(v.featured_image.src)
+        : (v.image_id && imgById.has(v.image_id) ? imgById.get(v.image_id) : (parentImages[0] || ''));
+      return {
+        name: (v.option1 || '').replace(/\s*ML$/i, 'ml'),
+        sku: v.sku || '',
+        regularPrice: compareAt || price,
+        salePrice: compareAt ? price : '',
+        images: main ? [main] : [],
+        extras: [],
+        colorCode: ''
+      };
+    });
+
+    const optionName = product.options && product.options[0] ? product.options[0].name : 'Size';
+
+    return { rows: variableRows(title, parentImages, description, '', categories, optionName, variants), title };
   }
 
   // ── Shea Miracles (Magento 2 — dataLayer + fotorama gallery) ──────────────
@@ -3216,6 +3530,67 @@
     const categories = '';
 
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
+  // ── Macadamia Hair variable product (Shopify AJAX API, macadamiahair.com) ────
+  async function scrapeMacadamiahairVariable(ctx) {
+    const html = ctx.mainHtml;
+    const u = new URL(ctx.url);
+    const handle = u.pathname.replace(/.*\/products\//, '').replace(/\/$/, '').split('?')[0];
+
+    const product = (await ctx.fetchJson(`${u.origin}/products/${handle}.json`)).product;
+    if (!product || !product.variants || !product.variants.length) throw new Error('Could not load Macadamia product JSON.');
+
+    const title = product.title ? decodeEntities(product.title) : '';
+
+    // Description from JSON-LD (product.body_html is often empty on this theme)
+    let description = '';
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product' && j.description) {
+          description = decodeEntities(j.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+          break;
+        }
+      } catch (e) {}
+    }
+    if (!description) description = shopifyBodyText(product);
+
+    // Categories: not available in JSON-LD, try Klaviyo
+    let categories = '';
+    const klavCategories = html.match(/Categories\s*:\s*(\[[^\]]+\])/);
+    if (klavCategories) {
+      try {
+        const arr = JSON.parse(klavCategories[1]);
+        categories = arr.filter(c => c !== 'All').join('>');
+      } catch (e) {}
+    }
+
+    // Parent images: all product images, sorted by position
+    const allImages = (product.images || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
+    const parentImages = allImages.map(im => normalizeShopUrl(im.src)).slice(0, 4);
+
+    // Build variants
+    const imgById = new Map(allImages.map(im => [im.id, normalizeShopUrl(im.src)]));
+    const variants = product.variants.map(v => {
+      const price = fmtPrice(v.price);
+      const compareAt = v.compare_at_price && parseFloat(v.compare_at_price) > 0 ? fmtPrice(v.compare_at_price) : '';
+      const main = v.featured_image ? normalizeShopUrl(v.featured_image.src)
+        : (v.image_id && imgById.has(v.image_id) ? imgById.get(v.image_id) : (parentImages[0] || ''));
+      return {
+        name: v.option1 || '',
+        sku: v.sku || '',
+        regularPrice: compareAt || price,
+        salePrice: compareAt ? price : '',
+        images: main ? [main] : [],
+        extras: [],
+        colorCode: ''
+      };
+    });
+
+    const optionName = product.options && product.options[0] ? product.options[0].name : 'Size';
+
+    return { rows: variableRows(title, parentImages, description, '', categories, optionName, variants), title };
   }
 
   // ── ACM Laboratoire (Shopify — ld+json Product, ImageObject, array offers) ──
@@ -3427,61 +3802,6 @@
       }
     });
     categories = cats.join(' > ');
-
-    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
-  }
-
-  // ── SVR Laboratoire (Shopify — ld+json Product + var meta fallback) ──────
-  async function scrapeSvrSimple(ctx) {
-    const html = ctx.mainHtml;
-    const blocks = ldBlocks(html);
-
-    let product = null;
-    for (const raw of blocks) {
-      try {
-        const j = JSON.parse(raw);
-        if (j['@type'] === 'Product') { product = j; break; }
-      } catch (e) {}
-    }
-
-    const title = decodeEntities((product && product.name) || '');
-
-    // SKU & Price: offers is an array, use first variant
-    let sku = '', price = '';
-    if (product && product.offers) {
-      const offersArray = Array.isArray(product.offers) ? product.offers : [product.offers];
-      const first = offersArray[0] || {};
-      sku = first.sku || product.sku || '';
-      if (typeof first.price !== 'undefined') price = String(first.price);
-    }
-
-    // Description from product JSON-LD
-    const description = decodeEntities((product && product.description || '').trim());
-
-    // Categories from product JSON-LD
-    const categories = (product && product.category) || '';
-
-    // Images: ImageObject format (image.url)
-    let images = [];
-    if (product && product.image) {
-      if (Array.isArray(product.image)) {
-        images = product.image.map(img => {
-          const u = (typeof img === 'object' && img.url) ? img.url : String(img);
-          return u.replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, '');
-        });
-      } else if (typeof product.image === 'object' && product.image.url) {
-        images = [product.image.url.replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, '')];
-      } else {
-        images = [String(product.image).replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, '')];
-      }
-    }
-    // Fallback: og:image
-    if (!images.length) {
-      const ogImg = (html.match(/property="og:image:secure_url"\s+content="([^"]+)"/) || [])[1]
-        || (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1];
-      if (ogImg) images = [ogImg.replace(/[?&]v=\d+/, '').replace(/[?&]width=\d+/, '').replace(/\?$/, '')];
-    }
-    images = [...new Set(images)].slice(0, 4);
 
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
@@ -4825,6 +5145,9 @@
     vichy: { variable: scrapeVichy, simple: scrapeVichy },
     larocheposay: { variable: scrapeLarocheposay, simple: scrapeLarocheposay },
     urbancare: { variable: scrapeUrbancareSimple, simple: scrapeUrbancareSimple },
+    urbancaretr: { variable: scrapeUrbancareTrSimple, simple: scrapeUrbancareTrSimple },
+    urbancarecl: { variable: scrapeUrbancareClSimple, simple: scrapeUrbancareClSimple },
+    urbancares: { variable: scrapeUrbancareSSimple, simple: scrapeUrbancareSSimple },
     bielenda: { variable: scrapeBielendaSimple, simple: scrapeBielendaSimple },
     cerave: { variable: scrapeCeraveSimple, simple: scrapeCeraveSimple },
     nars: { variable: scrapeNars, simple: scrapeNarsSimple },
@@ -4844,14 +5167,17 @@
     dermaliscio: { variable: scrapeDermaliscioSimple, simple: scrapeDermaliscioSimple },
     babaria: { variable: scrapeBabariaSimple, simple: scrapeBabariaSimple },
     sarahk: { variable: scrapeSarakhSimple, simple: scrapeSarakhSimple },
+    sarahkintl: { variable: scrapeSarakhIntlSimple, simple: scrapeSarakhIntlSimple },
+    sarahkstore: { variable: scrapeSarakhStoreSimple, simple: scrapeSarakhStoreSimple },
     sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
-    macadamiahair: { variable: scrapeMacadamiahairSimple, simple: scrapeMacadamiahairSimple },
+    svr1: { variable: scrapeSvr1Simple, simple: scrapeSvr1Simple },
+    olaplex: { variable: scrapeOlaplexVariable, simple: scrapeOlaplexSimple },
+    macadamiahair: { variable: scrapeMacadamiahairVariable, simple: scrapeMacadamiahairSimple },
     acm: { variable: scrapeAcmSimple, simple: scrapeAcmSimple },
     diegodallapalma: { variable: scrapeDiegodallapalma, simple: scrapeDiegodallapalmaSimple },
     eucerin: { variable: scrapeEucerinSimple, simple: scrapeEucerinSimple },
     isdin: { variable: scrapeIsdinSimple, simple: scrapeIsdinSimple },
     bioderma: { variable: scrapeBiodermaSimple, simple: scrapeBiodermaSimple },
-    svr: { variable: scrapeSvrSimple, simple: scrapeSvrSimple },
     isispharma: { variable: scrapeIsispharmaSimple, simple: scrapeIsispharmaSimple },
     uriage: { variable: scrapeUriageSimple, simple: scrapeUriageSimple },
     sebamed: { variable: scrapeSebamedSimple, simple: scrapeSebamedSimple },
@@ -4871,7 +5197,7 @@
       const map = {
         'nyxcosmetics.com': 'nyx', 'elfcosmetics.com': 'elf', 'maybelline.com': 'maybelline', 'hudabeauty.com': 'huda',
         'flormar.com': 'flormar', 'lorealparisusa.com': 'lorealparis', 'lorealparis.com.my': 'mylorealparis', 'vichy-me.com': 'vichy',
-        'pastelarabia.com': 'pastel', 'laroche-posay.us': 'larocheposay', 'urbancare.ro': 'urbancare',
+        'pastelarabia.com': 'pastel', 'laroche-posay.us': 'larocheposay', 'urbancare.ro': 'urbancare', 'urbancare.com.tr': 'urbancaretr', 'cliqat.com': 'urbancarecl', 'makeupstore.com': 'urbancares',
         'bielenda.pl': 'bielenda', 'sephora.com': 'sephora', 'cerave.com': 'cerave',
         'narscosmetics.com': 'nars', 'glowrecipe.com': 'glowrecipe',         'seventeencosmetics.com': 'seventeen',
         'inglotcosmetics.com': 'inglot', 'radiant-professional.com': 'radiant', 'misslyn.com': 'misslyn',
@@ -4886,13 +5212,12 @@
         'beesline.com': 'beesline',
         'dermaliscio.net': 'dermaliscio',
         'babaria.es': 'babaria',
-        'sarahk.com.br': 'sarahk',
-        'sheamiracles.com': 'sheamiracles',
+        'sarahk.com.br': 'sarahk', 'sarahkinternational.com': 'sarahkintl', 'sarahkstore.com': 'sarahkstore',
+        'sheamiracles.com': 'sheamiracles', 'easypara.com': 'svr1', 'olaplex.com': 'olaplex',
         'diegodallapalma.com': 'diegodallapalma',
         'eucerin-me.com': 'eucerin',
         'isdin.com': 'isdin',
         'bioderma.ae': 'bioderma',
-        'svr.com': 'svr',
         'isispharma.com': 'isispharma',
         'labo-acm.com': 'acm',
         'uriage.com': 'uriage',
@@ -4938,6 +5263,9 @@
     { name: 'Vichy', domain: 'vichy-me.com', key: 'vichy' },
     { name: 'La Roche-Posay', domain: 'laroche-posay.us', key: 'larocheposay' },
     { name: 'Urban Care', domain: 'urbancare.ro', key: 'urbancare' },
+    { name: 'Urban Care TR', domain: 'urbancare.com.tr', key: 'urbancaretr' },
+    { name: 'Urban Care CL', domain: 'cliqat.com', key: 'urbancarecl' },
+    { name: 'Urban Care S', domain: 'makeupstore.com', key: 'urbancares' },
     { name: 'Bielenda', domain: 'bielenda.pl', key: 'bielenda' },
     { name: 'Sephora', domain: 'sephora.com', key: 'sephora', example: 'https://www.sephora.com/product/tinted-moisturizer-oil-free-blurred-matte-spf-30-P515711?skuId=2854479&icid2=products%20grid:p515711:product' },
     { name: 'CeraVe', domain: 'cerave.com', key: 'cerave' },
@@ -4960,12 +5288,15 @@
     { name: 'Dermaliscio', domain: 'dermaliscio.net', key: 'dermaliscio', example: 'https://dermaliscio.net/product/hyaluronic-acid-anti-wrinkles-lifting-cream-15000-p-p-m-dermaliscio-shade-50-sunscreen/' },
     { name: 'Babaria', domain: 'babaria.es', key: 'babaria', example: 'https://babaria.es/en/producto/face-serum-collagen/' },
     { name: 'Sarah K', domain: 'sarahk.com.br', key: 'sarahk', example: 'https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2' },
+    { name: 'Sarah K International', domain: 'sarahkinternational.com', key: 'sarahkintl' },
+    { name: 'Sarah K Store', domain: 'sarahkstore.com', key: 'sarahkstore' },
     { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
+    { name: 'SVR 1', domain: 'easypara.com', key: 'svr1' },
+    { name: 'Olaplex', domain: 'olaplex.com', key: 'olaplex' },
     { name: 'Diego dalla Palma', domain: 'diegodallapalma.com', key: 'diegodallapalma', example: 'https://diegodallapalma.com/en/products/matita-sopracciglia-alta-precisione-resistente-all-acqua-lunga-tenuta-df12001-master' },
     { name: 'Eucerin', domain: 'eucerin-me.com', key: 'eucerin', example: 'https://www.en.eucerin-me.com/products/dermopure-clinical/scrub' },
     { name: 'ISDIN', domain: 'isdin.com', key: 'isdin', example: 'https://www.isdin.com/en-AE/product/isdinceutics/age-reverse-night' },
     { name: 'Bioderma', domain: 'bioderma.ae', key: 'bioderma', example: 'https://www.bioderma.ae/our-products/atoderm/creme' },
-    { name: 'SVR Laboratoire', domain: 'svr.com', key: 'svr', example: 'https://fr.svr.com/en/products/topialyse-gel-lavant-2' },
     { name: 'Isispharma', domain: 'isispharma.com', key: 'isispharma', example: 'https://www.isispharma.com/en/product/ato-balm/' },
     { name: 'ACM Laboratoire', domain: 'labo-acm.com', key: 'acm', example: 'https://labo-acm.com/en/products/shine-reducing-skincare' },
     { name: 'Uriage Eau Thermale', domain: 'uriage.com', key: 'uriage', example: 'https://www.uriage.com/MT/en/products/unctuous-body-balm' },
@@ -4978,7 +5309,7 @@
     { name: 'Makeover Pakistan', domain: 'makeoverpakistan.com', key: 'makeoverpakistan', example: 'https://www.makeoverpakistan.com/shop/high-perfection-foundation' },
     { name: 'Care To Beauty', domain: 'caretobeauty.com', key: 'caretobeauty', example: 'https://www.caretobeauty.com/jo/bell-hypoallergenic-soft-cream-concealer-02-vanilla-5-5g/' },
     { name: 'Notino', domain: 'notino.co.uk', key: 'notino', example: 'https://www.notino.co.uk/mac-cosmetics/macximal-sleek-satin-lipstick-mini-satin-lipstick-for-the-perfect-look/' },
-  ].map(b => ({ ...b, ready: !!SCRAPERS[b.key] }));
+  ].map(b => ({ ...b, ready: !!SCRAPERS[b.key], resize: true }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
 })(typeof self !== 'undefined' ? self : this);

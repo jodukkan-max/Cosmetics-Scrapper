@@ -24,7 +24,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 async function handleScrape({ mode, productType, url, tabId }) {
   if (mode === 'active') {
     if (!tabId) return { ok: false, error: 'No active tab.' };
-    // Inject the scraper engine, then run it in the page (same-origin fetch + rendered DOM).
     await chrome.scripting.executeScript({ target: { tabId }, files: ['scrapers.js'] });
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId },
@@ -120,7 +119,7 @@ async function wcTest({ store, authKey }) {
 }
 
 // ── CSV import via the plugin endpoint ──────────────────────────────────
-async function wcImport({ store, authKey, csv }) {
+async function wcImport({ store, authKey, csv, skip_resize_tags }) {
   try {
     const url = store.replace(/\/+$/, '') + '/wp-json/scraper/v1/import-csv';
     const r = await fetch(url, {
@@ -129,7 +128,7 @@ async function wcImport({ store, authKey, csv }) {
         'Content-Type': 'application/json',
         'X-Scraper-Key': authKey || '',
       },
-      body: JSON.stringify({ csv }),
+      body: JSON.stringify({ csv, skip_resize_tags: skip_resize_tags || [] }),
     });
     const data = await r.json().catch(() => ({}));
     if (r.status === 403) throw new Error('Invalid auth key. Check the key from the plugin dashboard.');
