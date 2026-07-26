@@ -5126,6 +5126,110 @@
     return { rows: simpleRow({ sku, name: title, description, price, images }), title };
   }
 
+  // ── Beauty Box (Shopify, JSON-LD, beautyboxjo.com) ─────────────────────────
+  async function scrapeBeautyboxSimple(ctx) {
+    const html = ctx.mainHtml;
+    const u = new URL(ctx.url);
+    const handle = u.pathname.replace(/.*\/products\//, '').replace(/\/$/, '').split('?')[0];
+
+    let product = null;
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product' && j.offers) { product = j; break; }
+      } catch (e) {}
+    }
+
+    const title = (product && product.name) ? decodeEntities(product.name) : '';
+    const sku = (product && product.sku) || '';
+
+    let description = '';
+    if (product && product.description) {
+      description = decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+
+    // Price from JSON-LD offers
+    let price = '';
+    if (product && product.offers) {
+      const offers = Array.isArray(product.offers) ? product.offers : [product.offers];
+      if (offers.length && offers[0].price != null) {
+        const p = parseFloat(offers[0].price);
+        price = isFinite(p) ? p.toFixed(2) : '';
+      }
+    }
+
+    // Images: prefer Shopify AJAX API (complete), fall back to JSON-LD / og
+    let images = [];
+    try {
+      const shopifyJson = (await ctx.fetchJson(`${u.origin}/products/${handle}.json`)).product;
+      if (shopifyJson && shopifyJson.images && shopifyJson.images.length) {
+        images = shopifyJson.images.map(im => normalizeShopUrl(im.src)).slice(0, 4);
+      }
+    } catch (e) {}
+    if (!images.length && product && product.image) {
+      const imgArr = Array.isArray(product.image) ? product.image : [product.image];
+      images = imgArr.map(u => u.split('?')[0]).slice(0, 4);
+    }
+    if (!images.length) {
+      const ogImg = (html.match(/property="og:image:secure_url"\s+content="([^"]+)"/) || [])[1] || (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1];
+      if (ogImg) images = [ogImg.split('?')[0]];
+    }
+
+    // Categories from Shopify product type
+    let categories = '';
+    const typeMatch = html.match(/ShopifyAnalytics\.meta\.product\.type"?\s*:\s*"([^"]+)"/);
+    if (typeMatch) categories = typeMatch[1];
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
+  // ── Skala Brasil (custom PHP, no JSON-LD, skalabrasil.com) ──────────────────
+  async function scrapeSkalabrasilSimple(ctx) {
+    const html = ctx.mainHtml;
+    const origin = new URL(ctx.url).origin;
+
+    // Title from <title> or og:title, strip the " - Skala Brasil" suffix
+    let title = '';
+    const titleTag = html.match(/<title>([^<]+)<\/title>/i);
+    if (titleTag) {
+      title = decodeEntities(titleTag[1].replace(/\s*-\s*Skala\s*Brasil\s*$/i, '').trim());
+    }
+    if (!title) {
+      const ogTitle = html.match(/property="og:title"\s+content="([^"]+)"/i);
+      if (ogTitle) title = decodeEntities(ogTitle[1].replace(/\s*-\s*Skala\s*Brasil\s*$/i, '').trim());
+    }
+
+    // Description from meta description
+    let description = '';
+    const metaDesc = html.match(/name="description"\s+content="([^"]+)"/i);
+    if (metaDesc) {
+      description = decodeEntities(metaDesc[1]
+        .replace(/\*\*/g, '')
+        .replace(/\s+/g, ' ')
+        .trim());
+    }
+
+    // Categories from .categoria div
+    let categories = '';
+    const catMatch = html.match(/class="categoria"[^>]*>\s*([^<]+)\s*<\/div>/i);
+    if (catMatch) categories = decodeEntities(catMatch[1].trim());
+
+    // Main image from #container-zoom
+    let images = [];
+    const imgMatch = html.match(/id="container-zoom"[^>]*src="([^"]+)"/i);
+    if (imgMatch) {
+      let imgUrl = decodeEntities(imgMatch[1]);
+      // Relative URL → absolute using page origin
+      if (imgUrl.startsWith('http')) {
+        images = [imgUrl];
+      } else {
+        images = [origin + (imgUrl.startsWith('/') ? imgUrl : '/' + imgUrl)];
+      }
+    }
+
+    return { rows: simpleRow({ sku: '', name: title, description, categories, images, price: '' }), title };
+  }
+
   // ── Dispatch ─────────────────────────────────────────────────────────────
   const SCRAPERS = {
     nyx: { variable: scrapeNyx, simple: scrapeNyxSimple },
@@ -5170,6 +5274,8 @@
     sarahkintl: { variable: scrapeSarakhIntlSimple, simple: scrapeSarakhIntlSimple },
     sarahkstore: { variable: scrapeSarakhStoreSimple, simple: scrapeSarakhStoreSimple },
     sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
+    skalabrasil: { variable: scrapeSkalabrasilSimple, simple: scrapeSkalabrasilSimple },
+    beautybox: { variable: scrapeBeautyboxSimple, simple: scrapeBeautyboxSimple },
     svr1: { variable: scrapeSvr1Simple, simple: scrapeSvr1Simple },
     olaplex: { variable: scrapeOlaplexVariable, simple: scrapeOlaplexSimple },
     macadamiahair: { variable: scrapeMacadamiahairVariable, simple: scrapeMacadamiahairSimple },
@@ -5213,7 +5319,7 @@
         'dermaliscio.net': 'dermaliscio',
         'babaria.es': 'babaria',
         'sarahk.com.br': 'sarahk', 'sarahkinternational.com': 'sarahkintl', 'sarahkstore.com': 'sarahkstore',
-        'sheamiracles.com': 'sheamiracles', 'easypara.com': 'svr1', 'olaplex.com': 'olaplex',
+        'sheamiracles.com': 'sheamiracles', 'skalabrasil.com': 'skalabrasil', 'beautyboxjo.com': 'beautybox', 'easypara.com': 'svr1', 'olaplex.com': 'olaplex',
         'diegodallapalma.com': 'diegodallapalma',
         'eucerin-me.com': 'eucerin',
         'isdin.com': 'isdin',
@@ -5291,6 +5397,8 @@
     { name: 'Sarah K International', domain: 'sarahkinternational.com', key: 'sarahkintl' },
     { name: 'Sarah K Store', domain: 'sarahkstore.com', key: 'sarahkstore' },
     { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
+    { name: 'Skala Brasil', domain: 'skalabrasil.com', key: 'skalabrasil' },
+    { name: 'Beauty Box', domain: 'beautyboxjo.com', key: 'beautybox' },
     { name: 'SVR 1', domain: 'easypara.com', key: 'svr1' },
     { name: 'Olaplex', domain: 'olaplex.com', key: 'olaplex' },
     { name: 'Diego dalla Palma', domain: 'diegodallapalma.com', key: 'diegodallapalma', example: 'https://diegodallapalma.com/en/products/matita-sopracciglia-alta-precisione-resistente-all-acqua-lunga-tenuta-df12001-master' },
