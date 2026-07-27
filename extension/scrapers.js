@@ -5352,21 +5352,28 @@
     const canonMatch = html.match(/<link[^>]*rel="canonical"[^>]*href="[^"]*\/([^\/]+)\/[^\/]+\/p\/[^\/"]+"/i);
     if (canonMatch) categories = decodeEntities(canonMatch[1]);
 
-    // Images: main from JSON-LD, alt images from _1, _2 etc pattern, limit to 4
+    // Images: extract all CDN image URLs matching the product SKU from HTML
     let images = [];
-    if (product.image) {
+    const skuForImg = product.sku || '';
+    if (skuForImg) {
+      // Extract all CDN image URLs that contain the SKU number
+      const imgRe = new RegExp(`https://cdn\\.mafrservices\\.com/[^"\\s]*${skuForImg}[^"\\s]*\\.(?:jpg|jpeg|png|webp)`, 'gi');
+      const matches = html.match(imgRe) || [];
+      images = matches.map(u => u.replace(/\\+$/, '').split('?')[0]);
+    }
+    // Fallback: use JSON-LD image + og:image
+    if (!images.length && product.image) {
       const mainImg = (Array.isArray(product.image) ? product.image[0] : product.image).split('?')[0];
       images.push(mainImg);
-      // Construct alt images from _main.jpg → _1.jpg, _2.jpg, etc.
+      // Try constructing alt images
       const base = mainImg.replace(/_main\.(jpg|jpeg|png|webp)$/i, '');
-      const ext = mainImg.match(/\.(jpg|jpeg|png|webp)$/i);
-      if (base !== mainImg && ext) {
-        for (let i = 1; i <= 5; i++) {
-          images.push(`${base}_${i}.${ext[1]}`);
+      if (base !== mainImg) {
+        const ext = mainImg.match(/\.(jpg|jpeg|png|webp)$/i);
+        if (ext) {
+          for (let i = 1; i <= 5; i++) images.push(`${base}_${i}.${ext[1]}`);
         }
       }
     }
-    // Also try og:image as fallback
     if (!images.length) {
       const ogImg = (html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || [])[1];
       if (ogImg) images = [ogImg.split('?')[0]];
