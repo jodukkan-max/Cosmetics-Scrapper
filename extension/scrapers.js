@@ -5214,20 +5214,116 @@
     const catMatch = html.match(/class="categoria"[^>]*>\s*([^<]+)\s*<\/div>/i);
     if (catMatch) categories = decodeEntities(catMatch[1].trim());
 
-    // Main image from #container-zoom
+    // Main image: prefer magnifier background-image (full absolute URL), fall back to img src
     let images = [];
-    const imgMatch = html.match(/id="container-zoom"[^>]*src="([^"]+)"/i);
-    if (imgMatch) {
-      let imgUrl = decodeEntities(imgMatch[1]);
-      // Relative URL → absolute using page origin
-      if (imgUrl.startsWith('http')) {
-        images = [imgUrl];
-      } else {
-        images = [origin + (imgUrl.startsWith('/') ? imgUrl : '/' + imgUrl)];
+    const magMatch = html.match(/img-magnifier-glass[^>]*background-image:\s*url\([^)]*?(https?:\/\/[^)"'\s]+\.(?:png|jpg|jpeg|webp))[^)]*?\)/i);
+    if (magMatch) {
+      images = [magMatch[1]];
+    }
+    if (!images.length) {
+      const imgMatch = html.match(/id="container-zoom"[^>]*src="([^"]+)"/i);
+      if (imgMatch) {
+        let imgUrl = decodeEntities(imgMatch[1]);
+        if (imgUrl.startsWith('http')) {
+          images = [imgUrl];
+        } else {
+          images = [origin + (imgUrl.startsWith('/') ? imgUrl : '/' + imgUrl)];
+        }
       }
     }
 
     return { rows: simpleRow({ sku: '', name: title, description, categories, images, price: '' }), title };
+  }
+
+  // ── Skinarte / DermoConcept (PrestaShop, JSON-LD, dermoconcept.pl) ───────────
+  async function scrapeSkinarteSimple(ctx) {
+    const html = ctx.mainHtml;
+
+    let product = null;
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product' && j.offers) { product = j; break; }
+      } catch (e) {}
+    }
+    if (!product) throw new Error('Could not find PrestaShop product JSON-LD.');
+
+    const title = (product && product.name) ? decodeEntities(product.name) : '';
+    const sku = (product && product.sku) || '';
+
+    let description = '';
+    if (product && product.description) {
+      description = decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+
+    // Price from JSON-LD offers
+    let price = '';
+    if (product && product.offers) {
+      const offer = product.offers;
+      if (offer.price != null) {
+        const p = parseFloat(offer.price);
+        price = isFinite(p) ? p.toFixed(2) : '';
+      }
+    }
+
+    // Category from JSON-LD
+    const categories = (product && product.category) ? decodeEntities(product.category) : '';
+
+    // Images from JSON-LD offer image array (thickbox_default = largest)
+    let images = [];
+    if (product && product.offers && product.offers.image) {
+      const imgArr = Array.isArray(product.offers.image) ? product.offers.image : [product.offers.image];
+      images = imgArr.map(u => u.split('?')[0]).slice(0, 4);
+    }
+    if (!images.length && product && product.image) {
+      images = [product.image.split('?')[0]];
+    }
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
+  // ── Dumyah ───────────────────────────────────────────────────────────────
+  async function scrapeDumyahSimple(ctx) {
+    const html = ctx.mainHtml;
+
+    let product = null;
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product' && j.offers) { product = j; break; }
+      } catch (e) {}
+    }
+    if (!product) throw new Error('Could not find Dumyah product JSON-LD.');
+
+    const title = product.name ? decodeEntities(product.name) : '';
+    const sku = '';
+
+    let description = '';
+    if (product.description) {
+      description = decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+
+    const price = '';
+    const categories = '';
+
+    // Images: try .swipebox data-original links (800x800 full-size), then JSON-LD image array, then og:image.
+    let images = [];
+    const swipeRe = /<a[^>]+class="[^"]*swipebox[^"]*"[^>]+data-original="(https?:\/\/[^"]+)"/gi;
+    let sm;
+    while ((sm = swipeRe.exec(html)) !== null) {
+      images.push(sm[1].split('?')[0]);
+    }
+    if (!images.length && product.image) {
+      const imgArr = Array.isArray(product.image) ? product.image : [product.image];
+      images = imgArr.map(u => u.split('?')[0]);
+    }
+    if (!images.length) {
+      const ogImg = (html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || [])[1];
+      if (ogImg) images = [ogImg.split('?')[0]];
+    }
+    images = [...new Set(images)].slice(0, 5);
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
   // ── Dispatch ─────────────────────────────────────────────────────────────
@@ -5275,6 +5371,7 @@
     sarahkstore: { variable: scrapeSarakhStoreSimple, simple: scrapeSarakhStoreSimple },
     sheamiracles: { variable: scrapeSheamiraclesSimple, simple: scrapeSheamiraclesSimple },
     skalabrasil: { variable: scrapeSkalabrasilSimple, simple: scrapeSkalabrasilSimple },
+    skinarte: { variable: scrapeSkinarteSimple, simple: scrapeSkinarteSimple },
     beautybox: { variable: scrapeBeautyboxSimple, simple: scrapeBeautyboxSimple },
     svr1: { variable: scrapeSvr1Simple, simple: scrapeSvr1Simple },
     olaplex: { variable: scrapeOlaplexVariable, simple: scrapeOlaplexSimple },
@@ -5294,6 +5391,7 @@
     makeoverpakistan: { variable: scrapeMakeoverPakistan },
     caretobeauty: { variable: scrapeCaretoBeauty, simple: scrapeCaretoBeautySimple },
     notino: { variable: scrapeNotino, simple: scrapeNotinoSimple },
+    dumyah: { variable: scrapeDumyahSimple, simple: scrapeDumyahSimple },
   };
 
   // Detect site from a URL hostname.
@@ -5319,7 +5417,7 @@
         'dermaliscio.net': 'dermaliscio',
         'babaria.es': 'babaria',
         'sarahk.com.br': 'sarahk', 'sarahkinternational.com': 'sarahkintl', 'sarahkstore.com': 'sarahkstore',
-        'sheamiracles.com': 'sheamiracles', 'skalabrasil.com': 'skalabrasil', 'beautyboxjo.com': 'beautybox', 'easypara.com': 'svr1', 'olaplex.com': 'olaplex',
+        'sheamiracles.com': 'sheamiracles', 'skalabrasil.com': 'skalabrasil', 'dermoconcept.pl': 'skinarte', 'beautyboxjo.com': 'beautybox', 'easypara.com': 'svr1', 'olaplex.com': 'olaplex',
         'diegodallapalma.com': 'diegodallapalma',
         'eucerin-me.com': 'eucerin',
         'isdin.com': 'isdin',
@@ -5337,6 +5435,7 @@
         'caretobeauty.com': 'caretobeauty',
         'notino.co.uk': 'notino',
         'maybelline.co.za': 'maybellineza',
+        'dumyah.com': 'dumyah',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -5398,6 +5497,7 @@
     { name: 'Sarah K Store', domain: 'sarahkstore.com', key: 'sarahkstore' },
     { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
     { name: 'Skala Brasil', domain: 'skalabrasil.com', key: 'skalabrasil' },
+    { name: 'Skinarte', domain: 'dermoconcept.pl', key: 'skinarte' },
     { name: 'Beauty Box', domain: 'beautyboxjo.com', key: 'beautybox' },
     { name: 'SVR 1', domain: 'easypara.com', key: 'svr1' },
     { name: 'Olaplex', domain: 'olaplex.com', key: 'olaplex' },
@@ -5417,6 +5517,7 @@
     { name: 'Makeover Pakistan', domain: 'makeoverpakistan.com', key: 'makeoverpakistan', example: 'https://www.makeoverpakistan.com/shop/high-perfection-foundation' },
     { name: 'Care To Beauty', domain: 'caretobeauty.com', key: 'caretobeauty', example: 'https://www.caretobeauty.com/jo/bell-hypoallergenic-soft-cream-concealer-02-vanilla-5-5g/' },
     { name: 'Notino', domain: 'notino.co.uk', key: 'notino', example: 'https://www.notino.co.uk/mac-cosmetics/macximal-sleek-satin-lipstick-mini-satin-lipstick-for-the-perfect-look/' },
+    { name: 'Dumyah', domain: 'dumyah.com', key: 'dumyah' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key], resize: true }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
