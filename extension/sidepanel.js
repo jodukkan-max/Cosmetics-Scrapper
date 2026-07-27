@@ -18,7 +18,7 @@ const escHtml = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/
 function detectSite(url) {
   try {
     const h = new URL(url).hostname.replace(/^www\./, '');
-    const map = { 'elfcosmetics.com':'e.l.f.','maybelline.com':'Maybelline','hudabeauty.com':'Huda Beauty','flormar.com':'Flormar','lorealparisusa.com':"L'Oréal Paris",'lorealparis.com.my':'My Loreal Paris','vichy-me.com':'Vichy','pastelarabia.com':'Pastel','laroche-posay.us':'La Roche-Posay','urbancare.ro':'Urban Care','urbancare.com.tr':'Urban Care TR','cliqat.com':'Urban Care CL','bielenda.pl':'Bielenda','makeupstore.com':'Urban Care S','sephora.com':'Sephora','cerave.com':'CeraVe','narscosmetics.com':'NARS','glowrecipe.com':'Glow Recipe','seventeencosmetics.com':'Seventeen','inglotcosmetics.com':'Inglot','clamanti.co.uk':'Clamanti','lacabine.es':'laCabine','brunovassari.com':'Bruno Vassari','beesline.com':'Beesline','dermaliscio.net':'Dermaliscio','babaria.es':'Babaria','sarahk.com.br':'Sarah K','sarahkinternational.com':'Sarah K International','sarahkstore.com':'Sarah K Store','sheamiracles.com':'Shea Miracles','skalabrasil.com':'Skala Brasil','dermoconcept.pl':'Skinarte','beautyboxjo.com':'Beauty Box','easypara.com':'SVR 1','olaplex.com':'Olaplex','macadamiahair.com':'Macadamia Hair','diegodallapalma.com':'Diego dalla Palma','eucerin-me.com':'Eucerin','isdin.com':'ISDIN','bioderma.ae':'Bioderma','isispharma.com':'Isispharma','labo-acm.com':'ACM','uriage.com':'Uriage','filorga.com':'Filorga','sebamed.com':'Seba Med','cantubeauty.com':'Cantu Beauty','al-dawaa.com':'Creme 21','tajclass.com':'Taj Class','makeoverpakistan.com':'Makeover Pakistan','caretobeauty.com':'Care To Beauty','notino.co.uk':'Notino','maybelline.co.za':'Maybelline SA','dumyah.com':'Dumyah' };
+    const map = { 'elfcosmetics.com':'e.l.f.','maybelline.com':'Maybelline','hudabeauty.com':'Huda Beauty','flormar.com':'Flormar','lorealparisusa.com':"L'Oréal Paris",'lorealparis.com.my':'My Loreal Paris','vichy-me.com':'Vichy','pastelarabia.com':'Pastel','laroche-posay.us':'La Roche-Posay','urbancare.ro':'Urban Care','urbancare.com.tr':'Urban Care TR','cliqat.com':'Urban Care CL','bielenda.pl':'Bielenda','makeupstore.com':'Urban Care S','sephora.com':'Sephora','cerave.com':'CeraVe','narscosmetics.com':'NARS','glowrecipe.com':'Glow Recipe','seventeencosmetics.com':'Seventeen','inglotcosmetics.com':'Inglot','clamanti.co.uk':'Clamanti','lacabine.es':'laCabine','brunovassari.com':'Bruno Vassari','beesline.com':'Beesline','dermaliscio.net':'Dermaliscio','babaria.es':'Babaria','sarahk.com.br':'Sarah K','sarahkinternational.com':'Sarah K International','sarahkstore.com':'Sarah K Store','sheamiracles.com':'Shea Miracles','skalabrasil.com':'Skala Brasil','dermoconcept.pl':'Skinarte','beautyboxjo.com':'Beauty Box','easypara.com':'SVR 1','olaplex.com':'Olaplex','macadamiahair.com':'Macadamia Hair','diegodallapalma.com':'Diego dalla Palma','eucerin-me.com':'Eucerin','isdin.com':'ISDIN','bioderma.ae':'Bioderma','isispharma.com':'Isispharma','labo-acm.com':'ACM','uriage.com':'Uriage','filorga.com':'Filorga','sebamed.com':'Seba Med','cantubeauty.com':'Cantu Beauty','al-dawaa.com':'Creme 21','tajclass.com':'Taj Class','makeoverpakistan.com':'Makeover Pakistan','caretobeauty.com':'Care To Beauty','notino.co.uk':'Notino','maybelline.co.za':'Maybelline SA','dumyah.com':'Dumyah', 'carrefouruae.com':'Carrefour UAE' };
     for (const d in map) if (h === d || h.endsWith('.' + d)) return map[d];
   } catch (e) {}
   return '';
@@ -476,17 +476,7 @@ async function fillStoreSelect(selEl) {
     ? stores.map(s => `<label><input type="checkbox" value="${s.id}"> ${escHtml(s.name)}</label>`).join('')
     : '<span class="none">No stores. Add one in the Stores tab.</span>';
 }
-async function getSkipResizeTags() {
-  const brandResize = (await chrome.storage.local.get('brandResize')).brandResize || {};
-  const brands = (self.ProductScraper && self.ProductScraper.brands) || [];
-  const skipped = brands.filter(b => brandResize[b.key] === false).map(b => b.name);
-  console.log('[skipResize] brandResize preferences:', JSON.stringify(brandResize));
-  console.log('[skipResize] available brands:', brands.map(b => `${b.key}=${b.name}`));
-  console.log('[skipResize] brands to skip resize for:', skipped.length ? skipped : '(none)');
-  return skipped;
-}
-
-async function importToStores(csv, selEl, statusFn) {
+async function importToStores(csv, selEl, statusFn, skipResize = false) {
   // If selEl is null, import to all stores (used by bulk single-click import).
   const stores = await getStores();
   let selected;
@@ -498,12 +488,11 @@ async function importToStores(csv, selEl, statusFn) {
     selected = stores.filter(s => s.authKey);
     if (!selected.length) return statusFn('error', 'No stores with auth keys configured.');
   }
-  const skip_resize_tags = await getSkipResizeTags();
   const report = [];
   for (const s of selected) {
     statusFn('loading', `Importing into ${s.name}...`);
     if (!s.authKey) { report.push(`${s.name}: missing auth key`); continue; }
-    const res = await chrome.runtime.sendMessage({ type: 'wcImport', store: s.url, authKey: s.authKey, csv, skip_resize_tags });
+    const res = await chrome.runtime.sendMessage({ type: 'wcImport', store: s.url, authKey: s.authKey, csv, skipResize });
     report.push(res.ok ? `✓ ${s.name}` : `✗ ${s.name}: ${res.error}`);
   }
   statusFn('success', report.join(' | '));
@@ -515,7 +504,8 @@ $('import-btn').addEventListener('click', async () => {
 });
 $('do-import-btn').addEventListener('click', () =>
   importToStores(csvOf(COLUMNS, exportRows()), $('store-select'),
-    (t, m) => { const el = $('import-status'); el.className = `status ${t}`; el.textContent = m; el.classList.remove('hidden'); }));
+    (t, m) => { const el = $('import-status'); el.className = `status ${t}`; el.textContent = m; el.classList.remove('hidden'); },
+    !$('resize-cb').checked));
 
 // I── Bulk queue (dedicated panel) I───────────────────────────────────────────
 async function getSaved() { return (await chrome.storage.local.get('savedProducts')).savedProducts || []; }
@@ -614,7 +604,8 @@ $('bulk-import-btn').addEventListener('click', async () => {
   if (credentialed.length === 1) {
     const { columns, rows } = combineSaved(saved);
     importToStores(csvOf(columns, rows), null,
-      (t, m) => { const el = $('bulk-import-status'); el.className = `status ${t}`; el.textContent = m; el.classList.remove('hidden'); });
+      (t, m) => { const el = $('bulk-import-status'); el.className = `status ${t}`; el.textContent = m; el.classList.remove('hidden'); },
+      !$('bulk-resize-cb').checked);
     $('bulk-import-status').classList.remove('hidden');
     return;
   }
@@ -627,21 +618,16 @@ $('bulk-do-import').addEventListener('click', async () => {
   if (!saved.length) return;
   const { columns, rows } = combineSaved(saved);
   importToStores(csvOf(columns, rows), $('bulk-store-select'),
-    (t, m) => { const el = $('bulk-import-status'); el.className = `status ${t}`; el.textContent = m; el.classList.remove('hidden'); });
+    (t, m) => { const el = $('bulk-import-status'); el.className = `status ${t}`; el.textContent = m; el.classList.remove('hidden'); },
+    !$('bulk-resize-cb').checked);
 });
 
-// ═══ Brands list (with discover buttons & resize toggles) ════════════════════
-let brandResize = {};
-(async () => {
-  brandResize = (await chrome.storage.local.get('brandResize')).brandResize || {};
-  renderBrands();
-})();
+// ═══ Brands list (with discover buttons) ════════════════════════════════════
 async function renderBrands() {
   const brands = (self.ProductScraper && self.ProductScraper.brands) || [];
   const ready = brands.filter(b => b.ready);
   const soon = brands.filter(b => !b.ready);
   const li = b => {
-    const checked = brandResize[b.key] !== undefined ? brandResize[b.key] : b.resize !== false;
     const discoverBtn = b.discover
       ? `<button class="brand-discover-btn" data-brand-key="${escHtml(b.key)}" data-brand-name="${escHtml(b.name)}">Discover</button>`
       : '';
@@ -650,7 +636,6 @@ async function renderBrands() {
       : '';
     const actions = [discoverBtn, exampleBtn].filter(Boolean).join('');
     return `<li>
-      <label class="brand-resize-toggle"><input type="checkbox" data-brand-key="${escHtml(b.key)}" ${checked ? 'checked' : ''}> Resize</label>
       <span class="brand-name">${escHtml(b.name)}</span>
       <div class="brand-actions">${actions}</div>
     </li>`;
@@ -661,13 +646,8 @@ async function renderBrands() {
   // Wire discover buttons
   document.querySelectorAll('.brand-discover-btn').forEach(btn =>
     btn.addEventListener('click', () => startDiscover(btn.dataset.brandKey, btn.dataset.brandName)));
-  // Wire resize checkboxes
-  document.querySelectorAll('.brand-resize-toggle input').forEach(cb =>
-    cb.addEventListener('change', async () => {
-      brandResize[cb.dataset.brandKey] = cb.checked;
-      await chrome.storage.local.set({ brandResize });
-    }));
 }
+renderBrands();
 
 // ═══ Discover (inline panel) ═══════════════════════════════════════════════════
 

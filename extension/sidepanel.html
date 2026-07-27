@@ -53,6 +53,9 @@
       <div id="import-box" class="import-box hidden">
         <div class="import-box-head">Import to store(s):</div>
         <div id="store-select" class="store-select"></div>
+        <label class="resize-toggle" style="display:flex;align-items:center;gap:6px;padding:8px 0;">
+          <input type="checkbox" id="resize-cb" checked> Resize images
+        </label>
         <button id="do-import-btn" class="woo-btn">Import to selected</button>
         <div id="import-status" class="status hidden"></div>
       </div>
@@ -117,6 +120,9 @@
       <div id="bulk-import-box" class="import-box hidden">
         <div class="import-box-head">Select store:</div>
         <div id="bulk-store-select" class="store-select"></div>
+        <label class="resize-toggle" style="display:flex;align-items:center;gap:6px;padding:8px 0;">
+          <input type="checkbox" id="bulk-resize-cb" checked> Resize images
+        </label>
         <button id="bulk-do-import" class="woo-btn">Import now</button>
         <div id="bulk-import-status" class="status hidden"></div>
       </div>

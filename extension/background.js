@@ -119,7 +119,7 @@ async function wcTest({ store, authKey }) {
 }
 
 // ── CSV import via the plugin endpoint ──────────────────────────────────
-async function wcImport({ store, authKey, csv, skip_resize_tags }) {
+async function wcImport({ store, authKey, csv, skipResize }) {
   try {
     const url = store.replace(/\/+$/, '') + '/wp-json/scraper/v1/import-csv';
     const r = await fetch(url, {
@@ -128,7 +128,7 @@ async function wcImport({ store, authKey, csv, skip_resize_tags }) {
         'Content-Type': 'application/json',
         'X-Scraper-Key': authKey || '',
       },
-      body: JSON.stringify({ csv, skip_resize_tags: skip_resize_tags || [] }),
+      body: JSON.stringify({ csv, skip_resize: !!skipResize }),
     });
     const data = await r.json().catch(() => ({}));
     if (r.status === 403) throw new Error('Invalid auth key. Check the key from the plugin dashboard.');
