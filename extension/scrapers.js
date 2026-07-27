@@ -5352,20 +5352,20 @@
     const canonMatch = html.match(/<link[^>]*rel="canonical"[^>]*href="[^"]*\/([^\/]+)\/[^\/]+\/p\/[^\/"]+"/i);
     if (canonMatch) categories = decodeEntities(canonMatch[1]);
 
-    // Images: extract all CDN image URLs matching the product SKU from HTML
+    // Images: search HTML first (sys-master-root has per-image hash paths),
+    // fall back to JSON-LD construction (works for pim-content products)
     let images = [];
-    const skuForImg = product.sku || '';
+    const skuForImg = String(product.sku || '');
     if (skuForImg) {
-      // Extract all CDN image URLs that contain the SKU number
-      const imgRe = new RegExp(`https://cdn\\.mafrservices\\.com/[^"\\s]*${skuForImg}[^"\\s]*\\.(?:jpg|jpeg|png|webp)`, 'gi');
+      const imgRe = new RegExp(`https?://cdn\\.mafrservices\\.com/[^"\\s]*${skuForImg}[^"\\s]*\\.(?:jpg|jpeg|png|webp)`, 'gi');
       const matches = html.match(imgRe) || [];
-      images = matches.map(u => u.replace(/\\+$/, '').split('?')[0]);
+      for (const u of matches) {
+        images.push(u.replace(/\\+$/, '').split('?')[0]);
+      }
     }
-    // Fallback: use JSON-LD image + og:image
     if (!images.length && product.image) {
       const mainImg = (Array.isArray(product.image) ? product.image[0] : product.image).split('?')[0];
       images.push(mainImg);
-      // Try constructing alt images
       const base = mainImg.replace(/_main\.(jpg|jpeg|png|webp)$/i, '');
       if (base !== mainImg) {
         const ext = mainImg.match(/\.(jpg|jpeg|png|webp)$/i);
