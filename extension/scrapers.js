@@ -5326,6 +5326,53 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Semsem (Magento, semsem.me) ─────────────────────────────────────────────
+  async function scrapeSemsemSimple(ctx) {
+    const html = ctx.mainHtml;
+
+    let product = null;
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product' && j.offers) { product = j; break; }
+      } catch (e) {}
+    }
+    if (!product) throw new Error('Could not find Semsem product JSON-LD.');
+
+    const title = product.name ? decodeEntities(product.name) : '';
+    const sku = product.sku ? decodeEntities(product.sku) : '';
+    const price = (product.offers && product.offers.price) ? String(product.offers.price) : '';
+
+    let description = '';
+    if (product.description) {
+      description = decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+
+    const categories = '';
+
+    // Images: main from JSON-LD image (strip query params)
+    let images = [];
+    if (product.image) {
+      const mainImg = (Array.isArray(product.image) ? product.image[0] : product.image).split('?')[0];
+      images.push(mainImg);
+      // Try alt images from naming pattern _1, _2 etc
+      const base = mainImg.replace(/_\d+\.(png|jpg|jpeg|webp)$/i, '');
+      if (base !== mainImg) {
+        const ext = mainImg.match(/\.(png|jpg|jpeg|webp)$/i);
+        if (ext) {
+          for (let i = 1; i <= 5; i++) images.push(`${base}_${i}.${ext[1]}`);
+        }
+      }
+    }
+    if (!images.length) {
+      const ogImg = (html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || [])[1];
+      if (ogImg) images = [ogImg.split('?')[0]];
+    }
+    images = [...new Set(images)];
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Dispatch ─────────────────────────────────────────────────────────────
   const SCRAPERS = {
     nyx: { variable: scrapeNyx, simple: scrapeNyxSimple },
@@ -5392,6 +5439,7 @@
     caretobeauty: { variable: scrapeCaretoBeauty, simple: scrapeCaretoBeautySimple },
     notino: { variable: scrapeNotino, simple: scrapeNotinoSimple },
     dumyah: { variable: scrapeDumyahSimple, simple: scrapeDumyahSimple },
+    semsem: { variable: scrapeSemsemSimple, simple: scrapeSemsemSimple },
   };
 
   // Detect site from a URL hostname.
@@ -5436,6 +5484,7 @@
         'notino.co.uk': 'notino',
         'maybelline.co.za': 'maybellineza',
         'dumyah.com': 'dumyah',
+        'semsem.me': 'semsem',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -5518,6 +5567,7 @@
     { name: 'Care To Beauty', domain: 'caretobeauty.com', key: 'caretobeauty', example: 'https://www.caretobeauty.com/jo/bell-hypoallergenic-soft-cream-concealer-02-vanilla-5-5g/' },
     { name: 'Notino', domain: 'notino.co.uk', key: 'notino', example: 'https://www.notino.co.uk/mac-cosmetics/macximal-sleek-satin-lipstick-mini-satin-lipstick-for-the-perfect-look/' },
     { name: 'Dumyah', domain: 'dumyah.com', key: 'dumyah' },
+    { name: 'Semsem', domain: 'semsem.me', key: 'semsem' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key], resize: true }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
