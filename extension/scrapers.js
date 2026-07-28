@@ -5422,6 +5422,61 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Carrefour (carrefouruae.com) ───────────────────────────────────────────
+  async function scrapeCarrefourSimple(ctx) {
+    const html = ctx.mainHtml;
+
+    let product = null;
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product' && j.offers) { product = j; break; }
+      } catch (e) {}
+    }
+    if (!product) throw new Error('Could not find Carrefour product JSON-LD.');
+
+    const title = product.name ? decodeEntities(product.name) : '';
+    const sku = product.sku ? decodeEntities(String(product.sku)) : '';
+    const price = (product.offers && product.offers.price) ? String(product.offers.price) : '';
+
+    let description = '';
+    if (product.description) {
+      description = decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+    if (!description) {
+      const ogDesc = (html.match(/<meta\s+property="og:description"\s+content="([^"]+)"/i) || [])[1];
+      if (ogDesc) description = decodeEntities(ogDesc);
+    }
+
+    // Category from canonical URL path segment
+    let categories = '';
+    const canonMatch = html.match(/<link[^>]*rel="canonical"[^>]*href="[^"]*\/en\/([^/]+)\//i);
+    if (canonMatch) categories = canonMatch[1].replace(/-/g, ' ');
+
+    // Images: construct from main JSON-LD image pattern
+    let images = [];
+    const skuStr = String(product.sku || '');
+    if (product.image && skuStr) {
+      const mainImg = (Array.isArray(product.image) ? product.image[0] : product.image).split('?')[0];
+      images.push(mainImg);
+      // Alt images: _2, _3, _4, _5 etc
+      const base = mainImg.replace(/_main\.(jpeg|jpg|png|webp)$/i, '');
+      if (base !== mainImg) {
+        const ext = mainImg.match(/\.(jpeg|jpg|png|webp)$/i);
+        if (ext) {
+          for (let i = 2; i <= 5; i++) images.push(`${base}_${i}.${ext[1]}`);
+        }
+      }
+    }
+    if (!images.length) {
+      const ogImg = (html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || [])[1];
+      if (ogImg) images = [ogImg.split('?')[0]];
+    }
+    images = [...new Set(images)];
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Dispatch ─────────────────────────────────────────────────────────────
   const SCRAPERS = {
     nyx: { variable: scrapeNyx, simple: scrapeNyxSimple },
@@ -5490,6 +5545,7 @@
     dumyah: { variable: scrapeDumyahSimple, simple: scrapeDumyahSimple },
     semsem: { variable: scrapeSemsemSimple, simple: scrapeSemsemSimple },
     galaxus: { variable: scrapeGalaxusSimple, simple: scrapeGalaxusSimple },
+    carrefour: { variable: scrapeCarrefourSimple, simple: scrapeCarrefourSimple },
   };
 
   // Detect site from a URL hostname.
@@ -5542,6 +5598,7 @@
         'galaxus.nl': 'galaxus',
         'galaxus.be': 'galaxus',
         'galaxus.it': 'galaxus',
+        'carrefouruae.com': 'carrefour',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -5626,6 +5683,7 @@
     { name: 'Dumyah', domain: 'dumyah.com', key: 'dumyah' },
     { name: 'Semsem', domain: 'semsem.me', key: 'semsem' },
     { name: 'Galaxus', domain: 'galaxus.ch', key: 'galaxus' },
+    { name: 'Carrefour', domain: 'carrefouruae.com', key: 'carrefour' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key], resize: true }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
