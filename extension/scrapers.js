@@ -5453,20 +5453,18 @@
     const canonMatch = html.match(/<link[^>]*rel="canonical"[^>]*href="[^"]*\/en\/([^/]+)\//i);
     if (canonMatch) categories = canonMatch[1].replace(/-/g, ' ');
 
-    // Images: construct from main JSON-LD image pattern
+    // Images: extract from <img> tags in HTML (CDN blocks constructed URLs)
     let images = [];
     const skuStr = String(product.sku || '');
-    if (product.image && skuStr) {
-      const mainImg = (Array.isArray(product.image) ? product.image[0] : product.image).split('?')[0];
-      images.push(mainImg);
-      // Alt images: _2, _3, _4, _5 etc
-      const base = mainImg.replace(/_main\.(jpeg|jpg|png|webp)$/i, '');
-      if (base !== mainImg) {
-        const ext = mainImg.match(/\.(jpeg|jpg|png|webp)$/i);
-        if (ext) {
-          for (let i = 2; i <= 5; i++) images.push(`${base}_${i}.${ext[1]}`);
-        }
+    if (skuStr) {
+      const imgRe = new RegExp('<img[^>]*src="(https?://[^"]*' + skuStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[^"]*\\.(?:jpeg|jpg|png|webp)[^"]*)"', 'gi');
+      let m;
+      while ((m = imgRe.exec(html)) !== null) {
+        images.push(m[1].split('?')[0]);
       }
+    }
+    if (!images.length && product.image) {
+      images = [(Array.isArray(product.image) ? product.image[0] : product.image).split('?')[0]];
     }
     if (!images.length) {
       const ogImg = (html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || [])[1];
