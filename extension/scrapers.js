@@ -5373,6 +5373,55 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Galaxus (galaxus.ch/.de/.at/.fr/.nl/.be/.it) ───────────────────────────
+  async function scrapeGalaxusSimple(ctx) {
+    const html = ctx.mainHtml;
+
+    let product = null;
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'Product' && j.offers) { product = j; break; }
+      } catch (e) {}
+    }
+    if (!product) throw new Error('Could not find Galaxus product JSON-LD.');
+
+    const title = product.name ? decodeEntities(product.name) : '';
+    const sku = product.sku ? decodeEntities(product.sku) : '';
+    const price = (product.offers && product.offers.price) ? String(product.offers.price) : '';
+
+    let description = '';
+    if (product.description) {
+      description = decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+
+    // Categories from BreadcrumbList JSON-LD
+    let categories = '';
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        if (j['@type'] === 'BreadcrumbList' && j.itemListElement) {
+          const names = j.itemListElement.map(e => e.name).filter(Boolean);
+          categories = names.join(' > ');
+          break;
+        }
+      } catch (e) {}
+    }
+
+    let images = [];
+    if (product.image) {
+      images = (Array.isArray(product.image) ? product.image : [product.image])
+        .map(u => u.split('?')[0]);
+    }
+    if (!images.length) {
+      const ogImg = (html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || [])[1];
+      if (ogImg) images = [ogImg.split('?')[0]];
+    }
+    images = [...new Set(images)];
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Dispatch ─────────────────────────────────────────────────────────────
   const SCRAPERS = {
     nyx: { variable: scrapeNyx, simple: scrapeNyxSimple },
@@ -5440,6 +5489,7 @@
     notino: { variable: scrapeNotino, simple: scrapeNotinoSimple },
     dumyah: { variable: scrapeDumyahSimple, simple: scrapeDumyahSimple },
     semsem: { variable: scrapeSemsemSimple, simple: scrapeSemsemSimple },
+    galaxus: { variable: scrapeGalaxusSimple, simple: scrapeGalaxusSimple },
   };
 
   // Detect site from a URL hostname.
@@ -5485,6 +5535,13 @@
         'maybelline.co.za': 'maybellineza',
         'dumyah.com': 'dumyah',
         'semsem.me': 'semsem',
+        'galaxus.ch': 'galaxus',
+        'galaxus.de': 'galaxus',
+        'galaxus.at': 'galaxus',
+        'galaxus.fr': 'galaxus',
+        'galaxus.nl': 'galaxus',
+        'galaxus.be': 'galaxus',
+        'galaxus.it': 'galaxus',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -5568,6 +5625,7 @@
     { name: 'Notino', domain: 'notino.co.uk', key: 'notino', example: 'https://www.notino.co.uk/mac-cosmetics/macximal-sleek-satin-lipstick-mini-satin-lipstick-for-the-perfect-look/' },
     { name: 'Dumyah', domain: 'dumyah.com', key: 'dumyah' },
     { name: 'Semsem', domain: 'semsem.me', key: 'semsem' },
+    { name: 'Galaxus', domain: 'galaxus.ch', key: 'galaxus' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key], resize: true }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
