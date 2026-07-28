@@ -5326,63 +5326,6 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
-  // ── Carrefour UAE (Next.js SPA, carrefouruae.com) ─────────────────────────
-  async function scrapeCarrefouruaeSimple(ctx) {
-    const html = ctx.mainHtml;
-
-    let product = null;
-    for (const raw of ldBlocks(html)) {
-      try {
-        const j = JSON.parse(raw);
-        if (j['@type'] === 'Product' && j.offers) { product = j; break; }
-      } catch (e) {}
-    }
-    if (!product) throw new Error('Could not find Carrefour UAE product JSON-LD.');
-
-    const title = product.name ? decodeEntities(product.name) : '';
-    const sku = '';
-    const price = '';
-
-    let description = '';
-    const ogDesc = (html.match(/<meta\s+property="og:description"\s+content="([^"]+)"/i) || [])[1];
-    if (ogDesc) description = decodeEntities(ogDesc);
-
-    let categories = '';
-    // Try to extract category from canonical URL path
-    const canonMatch = html.match(/<link[^>]*rel="canonical"[^>]*href="[^"]*\/([^\/]+)\/[^\/]+\/p\/[^\/"]+"/i);
-    if (canonMatch) categories = decodeEntities(canonMatch[1]);
-
-    // Images: search HTML first (sys-master-root has per-image hash paths),
-    // fall back to JSON-LD construction (works for pim-content products)
-    let images = [];
-    const skuForImg = String(product.sku || '');
-    if (skuForImg) {
-      const imgRe = new RegExp(`https?://cdn\\.mafrservices\\.com/[^"\\s]*${skuForImg}[^"\\s]*\\.(?:jpg|jpeg|png|webp)`, 'gi');
-      const matches = html.match(imgRe) || [];
-      for (const u of matches) {
-        images.push(u.replace(/\\+$/, '').split('?')[0]);
-      }
-    }
-    if (!images.length && product.image) {
-      const mainImg = (Array.isArray(product.image) ? product.image[0] : product.image).split('?')[0];
-      images.push(mainImg);
-      const base = mainImg.replace(/_main\.(jpg|jpeg|png|webp)$/i, '');
-      if (base !== mainImg) {
-        const ext = mainImg.match(/\.(jpg|jpeg|png|webp)$/i);
-        if (ext) {
-          for (let i = 1; i <= 5; i++) images.push(`${base}_${i}.${ext[1]}`);
-        }
-      }
-    }
-    if (!images.length) {
-      const ogImg = (html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || [])[1];
-      if (ogImg) images = [ogImg.split('?')[0]];
-    }
-    images = [...new Set(images)].slice(0, 4);
-
-    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
-  }
-
   // ── Dispatch ─────────────────────────────────────────────────────────────
   const SCRAPERS = {
     nyx: { variable: scrapeNyx, simple: scrapeNyxSimple },
@@ -5449,7 +5392,6 @@
     caretobeauty: { variable: scrapeCaretoBeauty, simple: scrapeCaretoBeautySimple },
     notino: { variable: scrapeNotino, simple: scrapeNotinoSimple },
     dumyah: { variable: scrapeDumyahSimple, simple: scrapeDumyahSimple },
-    carrefouruae: { variable: scrapeCarrefouruaeSimple, simple: scrapeCarrefouruaeSimple },
   };
 
   // Detect site from a URL hostname.
@@ -5494,7 +5436,6 @@
         'notino.co.uk': 'notino',
         'maybelline.co.za': 'maybellineza',
         'dumyah.com': 'dumyah',
-        'carrefouruae.com': 'carrefouruae',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -5577,7 +5518,6 @@
     { name: 'Care To Beauty', domain: 'caretobeauty.com', key: 'caretobeauty', example: 'https://www.caretobeauty.com/jo/bell-hypoallergenic-soft-cream-concealer-02-vanilla-5-5g/' },
     { name: 'Notino', domain: 'notino.co.uk', key: 'notino', example: 'https://www.notino.co.uk/mac-cosmetics/macximal-sleek-satin-lipstick-mini-satin-lipstick-for-the-perfect-look/' },
     { name: 'Dumyah', domain: 'dumyah.com', key: 'dumyah' },
-    { name: 'Carrefour UAE', domain: 'carrefouruae.com', key: 'carrefouruae' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key], resize: true }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
