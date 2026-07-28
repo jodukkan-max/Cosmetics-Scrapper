@@ -5475,6 +5475,67 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Enzo (enzoitaly.com) ─────────────────────────────────────────────────
+  async function scrapeEnzoSimple(ctx) {
+    const html = ctx.mainHtml;
+
+    let product = null;
+    let brand = '';
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        const items = Array.isArray(j) ? j : (j['@graph'] || [j]);
+        const prod = items.find(item => item['@type'] === 'Product' && item.offers);
+        if (prod) { product = prod; }
+        // Also extract brand name
+        if (product && product.brand && product.brand.name) {
+          brand = decodeEntities(product.brand.name);
+        }
+        break;
+      } catch (e) {}
+    }
+    if (!product) throw new Error('Could not find Enzo product JSON-LD.');
+
+    const title = product.name ? decodeEntities(product.name) : '';
+    const sku = product.sku ? decodeEntities(String(product.sku)) : '';
+    const price = (product.offers && product.offers.price) ? String(product.offers.price) : '';
+
+    let description = '';
+    if (product.description) {
+      description = decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+
+    // Categories from BreadcrumbList JSON-LD (skip "Home")
+    let categories = '';
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        const items = Array.isArray(j) ? j : (j['@graph'] || [j]);
+        const bc = items.find(item => item['@type'] === 'BreadcrumbList');
+        if (bc && bc.itemListElement) {
+          const names = bc.itemListElement.filter(e => e.name !== 'Home').map(e => e.name);
+          categories = names.join(' > ');
+          break;
+        }
+      } catch (e) {}
+    }
+
+    // Images: strip "/small/" prefix from JSON-LD images for full-size
+    let images = [];
+    if (product.image) {
+      images = (Array.isArray(product.image) ? product.image : [product.image])
+        .map(u => u.replace('/small/', '/'))
+        .map(u => u.split('?')[0]);
+    }
+    if (!images.length) {
+      const ogImg = (html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || [])[1];
+      if (ogImg) images = [ogImg.split('?')[0]];
+    }
+    images = [...new Set(images)];
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Dispatch ─────────────────────────────────────────────────────────────
   const SCRAPERS = {
     nyx: { variable: scrapeNyx, simple: scrapeNyxSimple },
@@ -5544,6 +5605,7 @@
     semsem: { variable: scrapeSemsemSimple, simple: scrapeSemsemSimple },
     galaxus: { variable: scrapeGalaxusSimple, simple: scrapeGalaxusSimple },
     carrefour: { variable: scrapeCarrefourSimple, simple: scrapeCarrefourSimple },
+    enzo: { variable: scrapeEnzoSimple, simple: scrapeEnzoSimple },
   };
 
   // Detect site from a URL hostname.
@@ -5597,6 +5659,7 @@
         'galaxus.be': 'galaxus',
         'galaxus.it': 'galaxus',
         'carrefouruae.com': 'carrefour',
+        'enzoitaly.com': 'enzo',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -5682,6 +5745,7 @@
     { name: 'Semsem', domain: 'semsem.me', key: 'semsem' },
     { name: 'Galaxus', domain: 'galaxus.ch', key: 'galaxus' },
     { name: 'Carrefour', domain: 'carrefouruae.com', key: 'carrefour' },
+    { name: 'Enzo', domain: 'enzoitaly.com', key: 'enzo' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key], resize: true }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
