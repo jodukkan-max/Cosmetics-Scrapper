@@ -5387,8 +5387,8 @@
     if (!product) throw new Error('Could not find Galaxus product JSON-LD.');
 
     const title = product.name ? decodeEntities(product.name) : '';
-    const sku = product.sku ? decodeEntities(product.sku) : '';
-    const price = (product.offers && product.offers.price) ? String(product.offers.price) : '';
+    const sku = '';
+    const price = '';
 
     let description = '';
     if (product.description) {
@@ -5417,7 +5417,7 @@
       const ogImg = (html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || [])[1];
       if (ogImg) images = [ogImg.split('?')[0]];
     }
-    images = [...new Set(images)];
+    images = [...new Set(images)].slice(0, 6);
 
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
