@@ -5536,6 +5536,75 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Celenes (Shopify, int.celenesbysweden.com) ─────────────────────────────
+  async function scrapeCelenesSimple(ctx) {
+    const html = ctx.mainHtml;
+
+    // Extract product handle from canonical URL
+    let handle = '';
+    const canonMatch = html.match(/<link[^>]*rel="canonical"[^>]*href="[^"]*\/products\/([^/?]+)/i);
+    if (canonMatch) handle = canonMatch[1];
+    if (!handle) {
+      // Fallback: extract from meta.product JSON
+      const hMatch = html.match(/"handle"\s*:\s*"([^"]+)"/);
+      if (hMatch) handle = hMatch[1];
+    }
+
+    // Title and description from custom JSON script blocks
+    let title = '';
+    let description = '';
+    const jsonScripts = html.match(/<script[^>]*type="application\/json"[^>]*>(.*?)<\/script>/gs) || [];
+    for (const tag of jsonScripts) {
+      const inner = tag.replace(/<script[^>]*type="application\/json"[^>]*>/, '').replace(/<\/script>/, '');
+      try {
+        const j = JSON.parse(inner);
+        if (j && typeof j === 'object' && !Array.isArray(j) && j.productTitle) {
+          title = decodeEntities(j.productTitle || '');
+          if (j.productDescription) {
+            // Strip <style> blocks first, then all HTML tags
+            description = decodeEntities(
+              j.productDescription
+                .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim()
+            );
+          }
+          break;
+        }
+      } catch (e) {}
+    }
+
+    // Fallback title from og:title or page title
+    if (!title) {
+      const ogTitle = (html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i) || [])[1];
+      if (ogTitle) title = decodeEntities(ogTitle);
+    }
+
+    const sku = '';
+    const price = '';
+    const categories = '';
+
+    // Images: Shopify AJAX API, fallback og:image
+    let images = [];
+    if (handle) {
+      const u = new URL(ctx.url);
+      try {
+        const shopifyJson = (await ctx.fetchJson(`${u.origin}/products/${handle}.json`)).product;
+        if (shopifyJson && shopifyJson.images && shopifyJson.images.length) {
+          images = shopifyJson.images.map(im => normalizeShopUrl(im.src));
+        }
+      } catch (e) {}
+    }
+    if (!images.length) {
+      const ogImg = (html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || [])[1];
+      if (ogImg) images = [ogImg.split('?')[0]];
+    }
+    images = [...new Set(images)];
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Dispatch ─────────────────────────────────────────────────────────────
   const SCRAPERS = {
     nyx: { variable: scrapeNyx, simple: scrapeNyxSimple },
@@ -5606,6 +5675,7 @@
     galaxus: { variable: scrapeGalaxusSimple, simple: scrapeGalaxusSimple },
     carrefour: { variable: scrapeCarrefourSimple, simple: scrapeCarrefourSimple },
     enzo: { variable: scrapeEnzoSimple, simple: scrapeEnzoSimple },
+    celenes: { variable: scrapeCelenesSimple, simple: scrapeCelenesSimple },
   };
 
   // Detect site from a URL hostname.
@@ -5660,6 +5730,7 @@
         'galaxus.it': 'galaxus',
         'carrefouruae.com': 'carrefour',
         'enzoitaly.com': 'enzo',
+        'celenesbysweden.com': 'celenes',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -5746,6 +5817,7 @@
     { name: 'Galaxus', domain: 'galaxus.ch', key: 'galaxus' },
     { name: 'Carrefour', domain: 'carrefouruae.com', key: 'carrefour' },
     { name: 'Enzo', domain: 'enzoitaly.com', key: 'enzo' },
+    { name: 'Celenes', domain: 'celenesbysweden.com', key: 'celenes' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key], resize: true }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
