@@ -5605,6 +5605,59 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Everymarket (everymarket.com) ─────────────────────────────────────────
+  async function scrapeEverymarketSimple(ctx) {
+    const html = ctx.mainHtml;
+
+    // JSON-LD: array [{Product}]
+    let product = null;
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        const items = Array.isArray(j) ? j : (j['@graph'] || [j]);
+        product = items.find(item => item['@type'] === 'Product' && item.offers);
+        if (product) break;
+      } catch (e) {}
+    }
+    if (!product) throw new Error('Could not find Everymarket product JSON-LD.');
+
+    const title = product.name ? decodeEntities(product.name) : '';
+    const sku = '';
+    const price = '';
+
+    let description = '';
+    if (product.description) {
+      description = decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+
+    const categories = '';
+
+    // Images: window.__PRODUCT__.images[].url_large → swap to width=1044
+    let images = [];
+    const prodMatch = html.match(/window\.__PRODUCT__\s*=\s*({[\s\S]*?});/);
+    if (prodMatch) {
+      try {
+        const prodData = JSON.parse(prodMatch[1].replace(/&amp;/g, '&').replace(/\\u0026/g, '&').replace(/&quot;/g, '"'));
+        if (prodData.images && prodData.images.length) {
+          images = prodData.images.map(im =>
+            (im.url_large || '').replace(/width=800/,'width=1044').replace(/height=800/,'height=1044')
+          ).filter(Boolean);
+        }
+      } catch (e) {}
+    }
+    // Fallback to JSON-LD image (already at 1044)
+    if (!images.length && product.image) {
+      images = [(Array.isArray(product.image) ? product.image[0] : product.image)];
+    }
+    if (!images.length) {
+      const ogImg = (html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || [])[1];
+      if (ogImg) images = [ogImg];
+    }
+    images = [...new Set(images)];
+
+    return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
+  }
+
   // ── Dispatch ─────────────────────────────────────────────────────────────
   const SCRAPERS = {
     nyx: { variable: scrapeNyx, simple: scrapeNyxSimple },
@@ -5676,6 +5729,7 @@
     carrefour: { variable: scrapeCarrefourSimple, simple: scrapeCarrefourSimple },
     enzo: { variable: scrapeEnzoSimple, simple: scrapeEnzoSimple },
     celenes: { variable: scrapeCelenesSimple, simple: scrapeCelenesSimple },
+    everymarket: { variable: scrapeEverymarketSimple, simple: scrapeEverymarketSimple },
   };
 
   // Detect site from a URL hostname.
@@ -5731,6 +5785,7 @@
         'carrefouruae.com': 'carrefour',
         'enzoitaly.com': 'enzo',
         'celenesbysweden.com': 'celenes',
+        'everymarket.com': 'everymarket',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -5818,6 +5873,7 @@
     { name: 'Carrefour', domain: 'carrefouruae.com', key: 'carrefour' },
     { name: 'Enzo', domain: 'enzoitaly.com', key: 'enzo' },
     { name: 'Celenes', domain: 'celenesbysweden.com', key: 'celenes' },
+    { name: 'Everymarket', domain: 'everymarket.com', key: 'everymarket' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key], resize: true }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
