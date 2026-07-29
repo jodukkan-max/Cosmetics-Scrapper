@@ -5592,7 +5592,7 @@
       try {
         const shopifyJson = (await ctx.fetchJson(`${u.origin}/products/${handle}.json`)).product;
         if (shopifyJson && shopifyJson.images && shopifyJson.images.length) {
-          images = shopifyJson.images.map(im => normalizeShopUrl(im.src));
+          images = shopifyJson.images.map(im => normalizeShopUrl(im.src)).slice(0, 5);
         }
       } catch (e) {}
     }
