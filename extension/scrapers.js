@@ -5540,16 +5540,6 @@
   async function scrapeCelenesSimple(ctx) {
     const html = ctx.mainHtml;
 
-    // Extract product handle from canonical URL
-    let handle = '';
-    const canonMatch = html.match(/<link[^>]*rel="canonical"[^>]*href="[^"]*\/products\/([^/?]+)/i);
-    if (canonMatch) handle = canonMatch[1];
-    if (!handle) {
-      // Fallback: extract from meta.product JSON
-      const hMatch = html.match(/"handle"\s*:\s*"([^"]+)"/);
-      if (hMatch) handle = hMatch[1];
-    }
-
     // Title and description from custom JSON script blocks
     let title = '';
     let description = '';
@@ -5585,35 +5575,34 @@
     const price = '';
     const categories = '';
 
-    // Images: Shopify AJAX API, fallback to HTML scraping
+    // Images: scrape from HTML (preserves ?v= cache-busting param)
     let images = [];
-    if (handle) {
-      const u = new URL(ctx.url);
-      try {
-        const shopifyJson = (await ctx.fetchJson(`${u.origin}/products/${handle}.json`)).product;
-        if (shopifyJson && shopifyJson.images && shopifyJson.images.length) {
-          images = shopifyJson.images.map(im => normalizeShopUrl(im.src)).slice(0, 5);
-        }
-      } catch (e) {}
-    }
-    // Fallback: scrape product images from HTML (protocol-relative URLs in gallery)
-    if (!images.length) {
-      const siteHost = new URL(ctx.url).hostname;
-      const escapedHost = siteHost.replace(/\./g, '\\.');
-      const cdnRe = new RegExp(
-        `//(?:cdn\\.shopify\\.com\\/s\\/files|${escapedHost}\\/cdn\\/shop\\/files)\\/(?!.*(?:logo|favicon|icon|flag))[^"\\s]*\\.(?:jpg|jpeg|png|webp)`,
-        'gi'
-      );
-      const matches = html.match(cdnRe) || [];
-      images = matches
-        .map(u => { const clean = u.split('?')[0]; return clean.startsWith('//') ? 'https:' + clean : clean; })
-        .map(u => u.replace(/_(?:large|grande|medium|compact|small|master|1024x1024|1200x|800x|640x|480x|320x|240x|160x|100x|pico|icon|thumb)\./, '.'))
-      ;
-      images = [...new Set(images)].slice(0, 5);
-    }
+    const siteHost = new URL(ctx.url).hostname;
+    const escapedHost = siteHost.replace(/\./g, '\\.');
+    const cdnRe = new RegExp(
+      `//(?:cdn\\.shopify\\.com\\/s\\/files|${escapedHost}\\/cdn\\/shop\\/files)\\/[^"\\s]*\\.(?:jpg|jpeg|png|webp)(?:\\?v=\\d+)?`,
+      'gi'
+    );
+    const matches = (html.match(cdnRe) || [])
+      .filter(u => !/(?:logo|favicon|icon|flag)/i.test(u.split('/').pop() || ''));
+    images = matches
+      .map(u => {
+        const clean = u.replace(/&(?:amp|quot|#039|lt|gt);/g, '').replace(/[\\\\"]+$/g, '').trim();
+        return clean.startsWith('//') ? 'https:' + clean : clean;
+      })
+      // Strip Shopify size suffix from filename, preserve ?v=
+      .map(u => {
+        const qidx = u.indexOf('?');
+        const base = qidx >= 0 ? u.substring(0, qidx) : u;
+        const query = qidx >= 0 ? u.substring(qidx) : '';
+        const cleaned = base.replace(/_(?:large|grande|medium|compact|small|master|1024x1024|1200x|800x|640x|480x|320x|240x|160x|100x|pico|icon|thumb)(?=\.\w+$)/, '');
+        return cleaned + query;
+      })
+    ;
+    images = [...new Set(images)].slice(0, 5);
     if (!images.length) {
       const ogImg = (html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || [])[1];
-      if (ogImg) images = [ogImg.split('?')[0]];
+      if (ogImg) images = [ogImg];
     }
     images = [...new Set(images)];
 
