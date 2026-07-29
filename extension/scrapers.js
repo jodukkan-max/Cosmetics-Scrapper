@@ -5647,6 +5647,62 @@
     return { rows: simpleRow({ sku, name: title, description, categories, images, price }), title };
   }
 
+  // ── Clara (Shopify, musejo.com) ──────────────────────────────────────────
+  async function scrapeClaraVariable(ctx) {
+    const html = ctx.mainHtml;
+    const u = new URL(ctx.url);
+    const handle = u.pathname.replace(/.*\/products\//, '').replace(/\/$/, '').split('?')[0];
+
+    const product = (await ctx.fetchJson(`${u.origin}/products/${handle}.json`)).product;
+    if (!product || !product.variants || !product.variants.length) throw new Error('Could not load Clara product JSON.');
+
+    const title = product.title ? decodeEntities(product.title) : '';
+    const description = shopifyBodyText(product);
+
+    let categories = '';
+    const typeMatch = html.match(/ShopifyAnalytics\.meta\.product\.type"?\s*:\s*"([^"]+)"/);
+    if (typeMatch) categories = typeMatch[1];
+    if (!categories) categories = product.product_type || '';
+
+    // Parent images from product.images
+    let parentImages = [];
+    if (product.images && product.images.length) {
+      parentImages = [...new Set(product.images.map(im => normalizeShopUrl(im.src)))].slice(0, 4);
+    }
+    if (!parentImages.length) {
+      const ogImg = (html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || [])[1];
+      if (ogImg) parentImages = [ogImg.startsWith('//') ? 'https:' + ogImg : ogImg];
+    }
+
+    // Build variant image map
+    const imgById = new Map();
+    if (product.images) {
+      for (const im of product.images) {
+        imgById.set(im.id, normalizeShopUrl(im.src));
+      }
+    }
+
+    const variants = product.variants.map(v => {
+      const price = fmtPrice(v.price);
+      const compareAt = v.compare_at_price && parseFloat(v.compare_at_price) > 0 ? fmtPrice(v.compare_at_price) : '';
+      const vImg = v.featured_image ? normalizeShopUrl(v.featured_image.src)
+        : (v.image_id && imgById.has(v.image_id) ? imgById.get(v.image_id) : (parentImages[0] || ''));
+      return {
+        name: v.option1 || 'Default',
+        sku: v.sku || '',
+        regularPrice: compareAt || price,
+        salePrice: compareAt ? price : '',
+        images: vImg ? [vImg] : [],
+        extras: [],
+        colorCode: ''
+      };
+    });
+
+    const optionName = product.options && product.options[0] ? product.options[0].name : 'Shade';
+
+    return { rows: variableRows(title, parentImages, description, '', categories, optionName, variants), title };
+  }
+
   // ── Dispatch ─────────────────────────────────────────────────────────────
   const SCRAPERS = {
     nyx: { variable: scrapeNyx, simple: scrapeNyxSimple },
@@ -5719,6 +5775,7 @@
     enzo: { variable: scrapeEnzoSimple, simple: scrapeEnzoSimple },
     celenes: { variable: scrapeCelenesSimple, simple: scrapeCelenesSimple },
     everymarket: { variable: scrapeEverymarketSimple, simple: scrapeEverymarketSimple },
+    clara: { variable: scrapeClaraVariable, simple: scrapeClaraVariable },
   };
 
   // Detect site from a URL hostname.
@@ -5775,6 +5832,7 @@
         'enzoitaly.com': 'enzo',
         'celenesbysweden.com': 'celenes',
         'everymarket.com': 'everymarket',
+        'musejo.com': 'clara',
       };
       for (const dom in map) if (h === dom || h.endsWith('.' + dom)) return map[dom];
     } catch (e) {}
@@ -5863,6 +5921,7 @@
     { name: 'Enzo', domain: 'enzoitaly.com', key: 'enzo' },
     { name: 'Celenes', domain: 'celenesbysweden.com', key: 'celenes' },
     { name: 'Everymarket', domain: 'everymarket.com', key: 'everymarket' },
+    { name: 'Clara', domain: 'musejo.com', key: 'clara' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key], resize: true }));
 
   root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
