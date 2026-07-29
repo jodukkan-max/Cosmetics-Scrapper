@@ -5575,30 +5575,15 @@
     const price = '';
     const categories = '';
 
-    // Images: scrape from HTML (preserves ?v= cache-busting param)
+    // Images: extract from data-fancybox="images" elements (product gallery)
     let images = [];
-    const siteHost = new URL(ctx.url).hostname;
-    const escapedHost = siteHost.replace(/\./g, '\\.');
-    const cdnRe = new RegExp(
-      `//(?:cdn\\.shopify\\.com\\/s\\/files|${escapedHost}\\/cdn\\/shop\\/files)\\/[^"\\s]*\\.(?:jpg|jpeg|png|webp)(?:\\?v=\\d+)?`,
-      'gi'
-    );
-    const matches = (html.match(cdnRe) || [])
-      .filter(u => !/(?:logo|favicon|icon|flag)/i.test(u.split('/').pop() || ''));
-    images = matches
-      .map(u => {
-        const clean = u.replace(/&(?:amp|quot|#039|lt|gt);/g, '').replace(/[\\\\"]+$/g, '').trim();
-        return clean.startsWith('//') ? 'https:' + clean : clean;
-      })
-      // Strip Shopify size suffix from filename, preserve ?v=
-      .map(u => {
-        const qidx = u.indexOf('?');
-        const base = qidx >= 0 ? u.substring(0, qidx) : u;
-        const query = qidx >= 0 ? u.substring(qidx) : '';
-        const cleaned = base.replace(/_(?:large|grande|medium|compact|small|master|1024x1024|1200x|800x|640x|480x|320x|240x|160x|100x|pico|icon|thumb)(?=\.\w+$)/, '');
-        return cleaned + query;
-      })
-    ;
+    const fancyRe = /data-fancybox="images"\s+href="([^"]*)"/g;
+    let m;
+    while ((m = fancyRe.exec(html)) !== null) {
+      let u = m[1].replace(/&amp;/g, '&').replace(/&quot;/g, '').trim();
+      if (u.startsWith('//')) u = 'https:' + u;
+      images.push(u);
+    }
     images = [...new Set(images)].slice(0, 5);
     if (!images.length) {
       const ogImg = (html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || [])[1];
