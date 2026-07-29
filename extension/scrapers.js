@@ -5585,7 +5585,7 @@
     const price = '';
     const categories = '';
 
-    // Images: Shopify AJAX API, fallback og:image
+    // Images: Shopify AJAX API, fallback to HTML scraping
     let images = [];
     if (handle) {
       const u = new URL(ctx.url);
@@ -5595,6 +5595,21 @@
           images = shopifyJson.images.map(im => normalizeShopUrl(im.src)).slice(0, 5);
         }
       } catch (e) {}
+    }
+    // Fallback: scrape product images from HTML (protocol-relative URLs in gallery)
+    if (!images.length) {
+      const siteHost = new URL(ctx.url).hostname;
+      const escapedHost = siteHost.replace(/\./g, '\\.');
+      const cdnRe = new RegExp(
+        `//(?:cdn\\.shopify\\.com\\/s\\/files|${escapedHost}\\/cdn\\/shop\\/files)\\/(?!.*(?:logo|favicon|icon|flag))[^"\\s]*\\.(?:jpg|jpeg|png|webp)`,
+        'gi'
+      );
+      const matches = html.match(cdnRe) || [];
+      images = matches
+        .map(u => { const clean = u.split('?')[0]; return clean.startsWith('//') ? 'https:' + clean : clean; })
+        .map(u => u.replace(/_(?:large|grande|medium|compact|small|master|1024x1024|1200x|800x|640x|480x|320x|240x|160x|100x|pico|icon|thumb)\./, '.'))
+      ;
+      images = [...new Set(images)].slice(0, 5);
     }
     if (!images.length) {
       const ogImg = (html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || [])[1];
