@@ -649,6 +649,8 @@ async function renderBrands() {
 }
 renderBrands();
 
+let discoverBrandName = '';
+
 // ═══ Discover (inline panel) ═══════════════════════════════════════════════════
 
 $('discover-close-btn').addEventListener('click', () => {
@@ -656,6 +658,7 @@ $('discover-close-btn').addEventListener('click', () => {
 });
 
 async function startDiscover(site, brandName) {
+  discoverBrandName = brandName;
   // Reset panel
   $('discover-brand-name').textContent = brandName;
   $('discover-results').classList.add('hidden');
@@ -699,24 +702,76 @@ function renderDiscoverResults(res) {
     const errorNote = cat.error ? `<span class="discover-error">⚠ ${escHtml(cat.error)}</span>` : '';
     let productRows = '';
     if (prods.length) {
-      productRows = prods.map((p, j) => `
+      productRows = prods.map((p, j) => {
+        const displayUrl = p.url.replace(/https?:\/\/pastelarabia\.com/, '');
+        return `
         <tr>
           <td class="discover-col-id">${j + 1}</td>
           <td>${p.name ? escHtml(p.name) : '<span class="muted">(unknown)</span>'}</td>
-          <td><a href="${escHtml(p.url)}" target="_blank" rel="noopener" class="discover-url">${escHtml(p.url.split('/en/catalogue/')[1] || p.url)}</a></td>
+          <td><a href="${escHtml(p.url)}" target="_blank" rel="noopener" class="discover-url">${escHtml(displayUrl)}</a></td>
           <td class="discover-col-add"><button class="discover-add-btn" data-url="${escHtml(p.url)}">+ Bulk</button></td>
-        </tr>`).join('');
+        </tr>`;
+      }).join('');
     }
     return `<details class="discover-cat-details"${i === 0 ? ' open' : ''}>
       <summary class="discover-cat-summary">
         <span class="discover-cat-name">${escHtml(cat.name)}</span>
-        <span class="discover-cat-url"><a href="${escHtml(cat.url)}" target="_blank" rel="noopener">${escHtml(cat.url.replace(/https?:\/\/seventeencosmetics\.com/, ''))}</a></span>
+        <span class="discover-cat-url"><a href="${escHtml(cat.url)}" target="_blank" rel="noopener">${escHtml(cat.url.replace(/https?:\/\/[^/]+/, ''))}</a></span>
         <span class="discover-cat-count">${prods.length}</span>
+        <button class="discover-scrape-cat-btn" data-cat-url="${escHtml(cat.url)}" data-cat-name="${escHtml(cat.name)}">Scrape</button>
         ${errorNote}
       </summary>
       ${prods.length ? `<table class="discover-prod-table"><thead><tr><th class="discover-col-id">#</th><th>Product</th><th>URL</th><th class="discover-col-add"></th></tr></thead><tbody>${productRows}</tbody></table>` : '<p class="muted" style="padding:0 12px 8px">No products found on this category page.</p>'}
     </details>`;
   }).join('');
+
+  // Wire scrape-category buttons
+  $('discover-tree').querySelectorAll('.discover-scrape-cat-btn').forEach(btn =>
+    btn.addEventListener('click', async (e) => {
+      const catUrl = e.target.dataset.catUrl;
+      const catName = e.target.dataset.catName;
+      // Disable all scrape buttons while scraping
+      const allBtns = $('discover-tree').querySelectorAll('.discover-scrape-cat-btn');
+      allBtns.forEach(b => b.disabled = true);
+      e.target.textContent = 'Scraping…';
+      try {
+        const res = await chrome.runtime.sendMessage({ type: 'scrapeCategory', collectionUrl: catUrl });
+        if (!res || !res.ok) throw new Error((res && res.error) || 'Category scrape failed');
+        const rows = res.rows || [];
+        // Tag all rows with the brand name, set categories and product URLs as fallback
+        rows.forEach(r => {
+          r.tags = discoverBrandName;
+          r['Product URL'] = r['Product URL'] || catUrl;
+          r.Categories = r.Categories || catName;
+        });
+        // If there were errors, show a note
+        if (res.errors && res.errors.length) {
+          status('warn', `Scraped ${rows.length} rows, ${res.errors.length} products had errors.`);
+        }
+        // Populate the main table and switch to Products tab
+        currentRows = rows;
+        if (currentRows.length > 0) {
+          setType(currentRows[0].hasOwnProperty('Type') ? 'variable' : 'simple');
+        }
+        renderResults(catName || 'Pastel Category');
+        $('status').classList.add('hidden');
+        // Switch to Products tab
+        document.querySelectorAll('.sp-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.sp-panel').forEach(p => p.classList.add('hidden'));
+        $('tab-products').classList.add('active');
+        $('panel-products').classList.remove('hidden');
+        // Scroll to table
+        $('data-table').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        // Close discover panel
+        $('discover-panel').classList.add('hidden');
+        status('success', `Scraped ${rows.length} rows from "${catName}" (${res.totalProducts || '?'} products).`);
+      } catch (err) {
+        status('error', err.message);
+      } finally {
+        e.target.textContent = 'Scrape';
+        allBtns.forEach(b => b.disabled = false);
+      }
+    }));
 
   // Wire "Add to bulk" buttons
   $('discover-tree').querySelectorAll('.discover-add-btn').forEach(btn =>
@@ -774,7 +829,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     if (msg.phase === 'scanning') {
       const pct = Math.round((msg.current / msg.total) * 100);
       $('discover-progress-fill').style.width = pct + '%';
-      const catName = (msg.catUrl || '').replace(/.*\/category\//, '').replace(/\/+$/, '').replace(/_\d+/, '');
+      const catName = (msg.catUrl || '').replace(/.*\/category\//, '').replace(/.*\/collections\//, '').replace(/\/+$/, '').replace(/_\d+/, '');
       $('discover-progress-text').textContent = `Scanning ${msg.current}/${msg.total}: ${catName} (${msg.foundSoFar} products so far)`;
     } else if (msg.phase === 'done') {
       $('discover-progress-fill').style.width = '100%';

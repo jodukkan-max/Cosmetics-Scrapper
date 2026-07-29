@@ -2862,11 +2862,166 @@
     return { categories, totalProducts, totalCategories: categories.length };
   }
 
+  // ── Pastel Discovery (Shopify collections API) ───────────────────────────
+  async function discoverPastel(ctx) {
+    const { fetchText, onProgress } = ctx;
+    const base = 'https://pastelarabia.com';
+
+    // 1) Fetch all collections
+    const collectionsJson = await fetchText(`${base}/collections.json?limit=250`);
+    let collections;
+    try { collections = JSON.parse(collectionsJson).collections || []; } catch (e) {
+      throw new Error('Failed to parse Pastel collections JSON');
+    }
+
+    // Filter out empty collections and the "all" collection
+    const active = collections.filter(c => c.handle !== 'all' && (c.products_count > 0 || c.handle !== 'frontpage'));
+    if (!active.length) throw new Error('No Pastel collections found.');
+
+    onProgress && onProgress({ phase: 'scanning', current: 0, total: active.length, foundSoFar: 0 });
+
+    const categories = [];
+    let foundSoFar = 0;
+
+    for (let i = 0; i < active.length; i++) {
+      const col = active[i];
+      const catUrl = `${base}/collections/${col.handle}`;
+      const products = [];
+      try {
+        // Get first page of products from this collection
+        const prodJson = await fetchText(`${base}/collections/${col.handle}/products.json?limit=250`);
+        const prods = JSON.parse(prodJson).products || [];
+        for (const p of prods) {
+          products.push({ name: p.title || p.handle, url: `${base}/products/${p.handle}` });
+        }
+      } catch (e) {
+        // Collection might be empty or inaccessible
+      }
+
+      foundSoFar += products.length;
+      categories.push({ name: col.title || col.handle, url: catUrl, products });
+      onProgress && onProgress({ phase: 'scanning', current: i + 1, total: active.length, foundSoFar, catUrl });
+    }
+
+    const totalProducts = categories.reduce((s, c) => s + c.products.length, 0);
+    onProgress && onProgress({ phase: 'done', totalCats: categories.length, totalProducts });
+    return { categories, totalProducts, totalCategories: categories.length };
+  }
+
+  // ── Pastel Category Scrape (scrape all products from a collection) ──────
+  async function scrapePastelCollection(collectionUrl) {
+    const u = new URL(collectionUrl);
+    const base = u.origin;
+    const handle = u.pathname.replace(/.*\/collections\//, '').replace(/\/$/, '');
+
+    // Fetch all pages of products from this collection
+    const allProducts = [];
+    let page = 1;
+    while (true) {
+      const url = `${base}/collections/${handle}/products.json?limit=250&page=${page}`;
+      let prods;
+      try {
+        const resp = await fetch(url);
+        const data = await resp.json();
+        prods = data.products || [];
+      } catch (e) { break; }
+      if (!prods.length) break;
+      allProducts.push(...prods);
+      if (prods.length < 250) break;
+      page++;
+    }
+
+    if (!allProducts.length) return { ok: true, rows: [], totalProducts: 0, errors: [] };
+
+    // Scrape each product in parallel batches
+    const allRows = [];
+    const errors = [];
+    const BATCH = 5;
+
+    for (let i = 0; i < allProducts.length; i += BATCH) {
+      const batch = allProducts.slice(i, i + BATCH);
+      const results = await Promise.allSettled(
+        batch.map(async (prod) => {
+          // Fetch product JSON to determine type + get full data
+          const prodJsonResp = await fetch(`${base}/products/${prod.handle}.json`);
+          const prodData = await prodJsonResp.json();
+          const product = prodData.product;
+          if (!product) return [];
+
+          if (product.variants && product.variants.length > 1) {
+            // Variable product: fetch page HTML for hex color codes
+            const pageResp = await fetch(`${base}/products/${prod.handle}`);
+            const productHtml = await pageResp.text();
+            const hexByValue = new Map();
+            for (const m of productHtml.matchAll(/name="Color"\s+value="([^"]+)"[\s\S]{0,260}?--option-color:\s*(#[0-9a-fA-F]{3,8})/g)) {
+              hexByValue.set(decodeEntities(m[1].trim()), m[2]);
+            }
+            const allImages = (product.images || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
+            const imgById = new Map(allImages.map(im => [im.id, normalizeShopUrl(im.src)]));
+            const sharedImages = allImages.filter(im => !(im.variant_ids || []).length && !/swatch/i.test(im.src.split('/').pop()))
+              .map(im => normalizeShopUrl(im.src));
+            const v0 = product.variants[0];
+            const v0src = v0 && v0.featured_image ? v0.featured_image.src : '';
+            const v0img = v0src && !/swatch/i.test(v0src) ? normalizeShopUrl(v0src) : '';
+            const parentImages = [...new Set([v0img, ...sharedImages].filter(Boolean))].slice(0, 4);
+            const variants = product.variants.map(v => {
+              const mainImg = v.featured_image ? normalizeShopUrl(v.featured_image.src)
+                : (v.image_id && imgById.has(v.image_id) ? imgById.get(v.image_id) : (parentImages[0] || ''));
+              const price = fmtPrice(v.price);
+              const compareAt = v.compare_at_price && parseFloat(v.compare_at_price) > 0 ? fmtPrice(v.compare_at_price) : '';
+              return {
+                name: v.option1,
+                sku: v.sku || '',
+                regularPrice: compareAt || price,
+                salePrice: compareAt ? price : '',
+                images: mainImg ? [mainImg] : [],
+                extras: [],
+                colorCode: hexByValue.get(v.option1) || ''
+              };
+            });
+            const optName = product.options && product.options[0] ? product.options[0].name : 'Color';
+            const rows = variableRows(product.title, parentImages, '', '', product.product_type || '', optName, variants);
+            rows.forEach(r => { r['Product URL'] = `${base}/products/${prod.handle}`; });
+            return rows;
+          } else {
+            // Simple product
+            const variant = product.variants && product.variants[0] ? product.variants[0] : {};
+            const price = fmtPrice(variant.price || 0);
+            const compareAt = variant.compare_at_price && parseFloat(variant.compare_at_price) > 0 ? fmtPrice(variant.compare_at_price) : '';
+            const images = (product.images || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0))
+              .filter(im => !/swatch/i.test(im.src.split('/').pop()))
+              .map(im => normalizeShopUrl(im.src));
+            const row = simpleRow({
+              sku: variant.sku || '',
+              name: product.title || '',
+              categories: product.product_type || '',
+              images,
+              price: compareAt || price
+            });
+            row.forEach(r => { r['Product URL'] = `${base}/products/${prod.handle}`; });
+            return row;
+          }
+        })
+      );
+
+      for (const r of results) {
+        if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+          allRows.push(...r.value);
+        } else if (r.status === 'rejected') {
+          errors.push(`${allProducts[i]?.handle || 'unknown'}: ${r.reason?.message || String(r.reason)}`);
+        }
+      }
+    }
+
+    return { ok: true, rows: allRows, totalProducts: allProducts.length, errors };
+  }
+
   const DISCOVERERS = {
     seventeen: discoverSeventeen,
     maybelline: discoverMaybelline,
     elf: discoverElf,
     nyx: discoverNyx,
+    pastel: discoverPastel,
   };
 
   async function discoverAll(ctx) {
@@ -5854,7 +6009,7 @@
     { name: 'NYX Professional Makeup', domain: 'nyxcosmetics.com', key: 'nyx', discover: true, example: 'https://www.nyxcosmetics.com/lip/lip-gloss-pouch/USNYX_44.html' },
     { name: 'e.l.f. Cosmetics', domain: 'elfcosmetics.com', key: 'elf', discover: true, example: 'https://www.elfcosmetics.com/products/smoky-kohl-eyeliner?Color=Black+Velvet' },
     { name: 'Huda Beauty', domain: 'hudabeauty.com', key: 'huda', example: 'https://hudabeauty.com/en-jo/products/easy-blur-natural-airbrush-foundation-with-niacinamide-hb01166m?variant=50573350273302' },
-    { name: 'Pastel', domain: 'pastelarabia.com', key: 'pastel', example: 'https://pastelarabia.com/collections/foundation/products/silky-dream-foundation' },
+    { name: 'Pastel', domain: 'pastelarabia.com', key: 'pastel', example: 'https://pastelarabia.com/collections/foundation/products/silky-dream-foundation', discover: true },
     { name: 'Glow Recipe', domain: 'glowrecipe.com', key: 'glowrecipe' },
     { name: 'Inglot', domain: 'inglotcosmetics.com', key: 'inglot' },
     { name: 'Maybelline', domain: 'maybelline.com', key: 'maybelline', discover: true, example: 'https://www.maybelline.com/face-makeup/foundation-makeup/fit-me-matte-poreless-foundation?variant=334' },
@@ -5924,5 +6079,5 @@
     { name: 'Clara', domain: 'musejo.com', key: 'clara' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key], resize: true }));
 
-  root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS };
+  root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS, scrapePastelCollection };
 })(typeof self !== 'undefined' ? self : this);

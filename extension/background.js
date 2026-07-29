@@ -12,6 +12,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       else if (msg.type === 'wcImport') sendResponse(await wcImport(msg));
       else if (msg.type === 'fetchSwatchDataUrl') sendResponse({ dataUrl: await fetchSwatchAsDataUrl(msg.swatchUrl) });
       else if (msg.type === 'bulkDiscover') handleBulkDiscover(msg, sendResponse);
+      else if (msg.type === 'scrapeCategory') handleScrapeCategory(msg, sendResponse);
       else sendResponse({ ok: false, error: 'Unknown message' });
     } catch (e) {
       sendResponse({ ok: false, error: e.message || String(e) });
@@ -149,6 +150,17 @@ async function handleBulkDiscover(msg, sendResponse) {
   try {
     const result = await self.ProductScraper.discoverAll({ site, fetchText, onProgress });
     sendResponse({ ok: true, ...result });
+  } catch (e) {
+    sendResponse({ ok: false, error: e.message || String(e) });
+  }
+}
+
+// ── Scrape a category collection ──────────────────────────────────────────
+async function handleScrapeCategory(msg, sendResponse) {
+  const { collectionUrl } = msg;
+  try {
+    const result = await self.ProductScraper.scrapePastelCollection(collectionUrl);
+    sendResponse(result);
   } catch (e) {
     sendResponse({ ok: false, error: e.message || String(e) });
   }
