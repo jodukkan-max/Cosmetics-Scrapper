@@ -2862,50 +2862,52 @@
     return { categories, totalProducts, totalCategories: categories.length };
   }
 
-  // ── Pastel Discovery (Shopify collections API) ───────────────────────────
+  // ── Pastel Discovery (Shopify — collections API → sitemap-style) ──────────
   async function discoverPastel(ctx) {
     const { fetchText, onProgress } = ctx;
     const base = 'https://pastelarabia.com';
 
-    // 1) Fetch all collections
+    // Fetch all collections (acts as category sitemap)
     const collectionsJson = await fetchText(`${base}/collections.json?limit=250`);
-    let collections;
-    try { collections = JSON.parse(collectionsJson).collections || []; } catch (e) {
+    let allCollections;
+    try { allCollections = JSON.parse(collectionsJson).collections || []; } catch (e) {
       throw new Error('Failed to parse Pastel collections JSON');
     }
 
-    // Filter out empty collections and the "all" collection
-    const active = collections.filter(c => c.handle !== 'all' && (c.products_count > 0 || c.handle !== 'frontpage'));
-    if (!active.length) throw new Error('No Pastel collections found.');
+    // Filter: skip "all" and frontpage collections
+    const collections = allCollections.filter(c =>
+      c.handle !== 'all' && c.handle !== 'frontpage');
 
-    onProgress && onProgress({ phase: 'scanning', current: 0, total: active.length, foundSoFar: 0 });
+    if (!collections.length) throw new Error('No Pastel collections found.');
 
+    const total = collections.length;
     const categories = [];
-    let foundSoFar = 0;
+    let totalProductsFound = 0;
 
-    for (let i = 0; i < active.length; i++) {
-      const col = active[i];
+    // For each collection (category), fetch its products
+    for (let i = 0; i < collections.length; i++) {
+      const col = collections[i];
       const catUrl = `${base}/collections/${col.handle}`;
-      const products = [];
+      onProgress && onProgress({ phase: 'scanning', current: i + 1, total, catUrl, foundSoFar: totalProductsFound });
+
       try {
-        // Get first page of products from this collection
+        // Fetch first page of products from this collection
         const prodJson = await fetchText(`${base}/collections/${col.handle}/products.json?limit=250`);
         const prods = JSON.parse(prodJson).products || [];
-        for (const p of prods) {
-          products.push({ name: p.title || p.handle, url: `${base}/products/${p.handle}` });
-        }
-      } catch (e) {
-        // Collection might be empty or inaccessible
-      }
+        const products = prods.map(p => ({
+          name: p.title || p.handle,
+          url: `${base}/products/${p.handle}`
+        }));
 
-      foundSoFar += products.length;
-      categories.push({ name: col.title || col.handle, url: catUrl, products });
-      onProgress && onProgress({ phase: 'scanning', current: i + 1, total: active.length, foundSoFar, catUrl });
+        totalProductsFound += products.length;
+        categories.push({ name: col.title || col.handle, url: catUrl, products });
+      } catch (e) {
+        categories.push({ name: col.title || col.handle, url: catUrl, products: [], error: e.message });
+      }
     }
 
-    const totalProducts = categories.reduce((s, c) => s + c.products.length, 0);
-    onProgress && onProgress({ phase: 'done', totalCats: categories.length, totalProducts });
-    return { categories, totalProducts, totalCategories: categories.length };
+    onProgress && onProgress({ phase: 'done', totalCats: categories.length, totalProducts: totalProductsFound });
+    return { categories, totalProducts: totalProductsFound, totalCategories: categories.length };
   }
 
   // ── Pastel Category Scrape (scrape all products from a collection) ──────
