@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Universal Scrapper</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+  <link rel="stylesheet" href="layout.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Left: embedded browser (the page you scrape) -->
+    <div class="browser-pane">
+      <div class="urlbar">
+        <input id="url-input" type="text" placeholder="https://example.com/product" spellcheck="false" />
+        <button id="go-btn" type="button">Go</button>
+      </div>
+      <webview id="browser" src="about:blank" allowpopups></webview>
+    </div>
+
+    <!-- Right: the scraper panel (ported sidepanel UI) -->
+    <div class="panel-pane">
+      <header class="sp-header">
+        <div class="sp-tabs">
+          <button id="tab-products" class="sp-tab active" data-tab="products">Products</button>
+          <button id="tab-stores" class="sp-tab" data-tab="stores">Stores</button>
+          <button id="tab-websites" class="sp-tab" data-tab="websites">Websites</button>
+        </div>
+      </header>
+
+      <!-- Products panel -->
+      <section id="panel-products" class="sp-panel">
+        <div id="hero">
+          <h2 id="hero-title" class="hero-title">Scrape Any Ecommerce Website!</h2>
+          <div id="hero-controls">
+            <div id="hero-buttons">
+              <button id="scrape-page-btn" class="primary-btn">Scrape this page</button>
+              <button id="add-scraper-btn" class="secondary-btn">Add new Scrapper</button>
+            </div>
+            <div id="status" class="status hidden"></div>
+          </div>
+          <div id="scraper-progress" class="scraper-progress hidden">
+            <table class="scraper-table">
+              <thead>
+                <tr><th>Step</th><th>Result</th></tr>
+              </thead>
+              <tbody id="scraper-steps">
+                <tr data-step="1">
+                  <td class="step-label">Read page HTML</td>
+                  <td class="step-result"><span class="step-mark"></span><span class="step-detail"></span></td>
+                </tr>
+                <tr data-step="2">
+                  <td class="step-label">Ask AI to check the page</td>
+                  <td class="step-result"><span class="step-mark"></span><span class="step-detail"></span></td>
+                </tr>
+                <tr data-step="3">
+                  <td class="step-label">Product page?</td>
+                  <td class="step-result"><span class="step-mark"></span><span class="step-detail"></span></td>
+                </tr>
+                <tr data-step="4">
+                  <td class="step-label">Simple or variable product?</td>
+                  <td class="step-result"><span class="step-mark"></span><span class="step-detail"></span></td>
+                </tr>
+                <tr data-step="5">
+                  <td class="step-label">Attributes</td>
+                  <td class="step-result"><span class="step-mark"></span><span class="step-detail"></span></td>
+                </tr>
+                <tr data-step="6">
+                  <td class="step-label">Attribute names</td>
+                  <td class="step-result"><span class="step-mark"></span><span class="step-detail"></span></td>
+                </tr>
+                <tr data-step="7">
+                  <td class="step-label">Color swatches</td>
+                  <td class="step-result"><span class="step-mark"></span><span class="step-detail"></span></td>
+                </tr>
+                <tr data-step="8">
+                  <td class="step-label">Generate scraper (AI)</td>
+                  <td class="step-result"><span class="step-mark"></span><span class="step-detail"></span></td>
+                </tr>
+                <tr data-step="9">
+                  <td class="step-label">Scraping the product</td>
+                  <td class="step-result"><span class="step-mark"></span><span class="step-detail"></span></td>
+                </tr>
+              </tbody>
+            </table>
+            <div id="agent-thought" class="agent-thought hidden"></div>
+            <div id="scrape-bar" class="scrape-bar hidden"><div class="scrape-bar-fill"></div></div>
+          </div>
+        </div>
+        <div id="type-badge" class="type-badge hidden"></div>
+
+        <!-- Results table -->
+        <div id="results" class="results hidden">
+          <div class="results-head">
+            <span id="result-count" class="muted"></span>
+          </div>
+          <div class="results-actions">
+            <button id="copy-btn">Copy</button>
+            <button id="csv-btn">CSV</button>
+            <button id="import-btn" class="woo-btn">Import</button>
+          </div>
+
+          <div id="import-box" class="import-box hidden">
+            <div class="import-box-head">Import to store(s):</div>
+            <div id="store-select" class="store-select"></div>
+            <label class="resize-toggle" style="display:flex;align-items:center;gap:6px;padding:8px 0;">
+              <input type="checkbox" id="resize-cb" checked> Resize images
+            </label>
+            <button id="do-import-btn" class="woo-btn">Import to selected</button>
+            <div id="import-status" class="status hidden"></div>
+          </div>
+
+          <div class="table-wrap">
+            <table id="data-table"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+          </div>
+        </div>
+
+        <!-- Post-scrape confirmation for AI-generated scrapers -->
+        <div id="scraper-confirm" class="scraper-confirm hidden">
+          <div class="confirm-question">Is the scraped data correct?</div>
+          <div class="confirm-actions">
+            <button id="confirm-yes-btn" class="primary-btn">Yes</button>
+            <button id="confirm-no-btn" class="secondary-btn">No</button>
+          </div>
+          <div id="fix-panel" class="fix-panel hidden">
+            <div class="fix-hint">Check the fields that are wrong and (optionally) type the correct value so the AI can fix them.</div>
+            <div id="fix-fields" class="fix-fields"></div>
+            <button id="fix-submit-btn" class="primary-btn">Fix with AI</button>
+            <div id="fix-status" class="status hidden"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Stores panel -->
+      <section id="panel-stores" class="sp-panel hidden">
+        <div class="store-form">
+          <input type="text" id="store-name" placeholder="Store name" />
+          <input type="url" id="store-url" placeholder="https://store.com" />
+          <input type="text" id="store-authkey" placeholder="Auth key (4-digit)" autocomplete="off" />
+          <div class="store-form-actions">
+            <button id="store-save-btn" class="primary-btn">Save store</button>
+            <button id="store-cancel-btn" class="hidden">Cancel</button>
+          </div>
+          <div id="store-form-status" class="status hidden"></div>
+        </div>
+        <ul id="store-list" class="store-list"></ul>
+      </section>
+
+      <!-- Websites panel -->
+      <section id="panel-websites" class="sp-panel hidden">
+        <div class="brands">
+          <ul id="brands-list" class="brands-list"></ul>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script src="brands.js"></script>
+  <script src="supabase.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

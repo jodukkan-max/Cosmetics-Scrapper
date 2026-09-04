@@ -1,0 +1,1106 @@
+[
+  {
+    "domain": "nyxcosmetics.com",
+    "type": "variable",
+    "brand": "NYX Professional Makeup",
+    "example": "https://www.nyxcosmetics.com/lip/lip-gloss-pouch/USNYX_44.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "nyxcosmetics.com",
+    "type": "simple",
+    "brand": "NYX Professional Makeup",
+    "example": "https://www.nyxcosmetics.com/lip/lip-gloss-pouch/USNYX_44.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "elfcosmetics.com",
+    "type": "variable",
+    "brand": "e.l.f. Cosmetics",
+    "example": "https://www.elfcosmetics.com/products/smoky-kohl-eyeliner?Color=Black+Velvet",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "elfcosmetics.com",
+    "type": "simple",
+    "brand": "e.l.f. Cosmetics",
+    "example": "https://www.elfcosmetics.com/products/smoky-kohl-eyeliner?Color=Black+Velvet",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "hudabeauty.com",
+    "type": "variable",
+    "brand": "Huda Beauty",
+    "example": "https://hudabeauty.com/en-jo/products/easy-blur-natural-airbrush-foundation-with-niacinamide-hb01166m?variant=50573350273302",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "hudabeauty.com",
+    "type": "simple",
+    "brand": "Huda Beauty",
+    "example": "https://hudabeauty.com/en-jo/products/easy-blur-natural-airbrush-foundation-with-niacinamide-hb01166m?variant=50573350273302",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "pastelarabia.com",
+    "type": "variable",
+    "brand": "Pastel",
+    "example": "https://pastelarabia.com/collections/foundation/products/silky-dream-foundation",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "pastelarabia.com",
+    "type": "simple",
+    "brand": "Pastel",
+    "example": "https://pastelarabia.com/collections/foundation/products/silky-dream-foundation",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "glowrecipe.com",
+    "type": "variable",
+    "brand": "Glow Recipe",
+    "example": "https://www.glowrecipe.com/products/watermelon-glow-niacinamide-dew-drops",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "glowrecipe.com",
+    "type": "simple",
+    "brand": "Glow Recipe",
+    "example": "https://www.glowrecipe.com/products/watermelon-glow-niacinamide-dew-drops",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "inglotcosmetics.com",
+    "type": "variable",
+    "brand": "Inglot",
+    "example": "https://inglotcosmetics.com/en/eyeliners/99-amc-eyeliner-gel",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "inglotcosmetics.com",
+    "type": "simple",
+    "brand": "Inglot",
+    "example": "https://inglotcosmetics.com/en/eyeliners/99-amc-eyeliner-gel",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "maybelline.com",
+    "type": "variable",
+    "brand": "Maybelline",
+    "example": "https://www.maybelline.com/face-makeup/foundation-makeup/fit-me-matte-poreless-foundation?variant=334",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "maybelline.com",
+    "type": "simple",
+    "brand": "Maybelline",
+    "example": "https://www.maybelline.com/face-makeup/foundation-makeup/fit-me-matte-poreless-foundation?variant=334",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "maybelline.co.za",
+    "type": "variable",
+    "brand": "Maybelline SA",
+    "example": "https://www.maybelline.co.za/face-makeup/foundation/fit-me-matte-poreless-foundation",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "flormar.com",
+    "type": "variable",
+    "brand": "Flormar",
+    "example": "https://www.flormar.com/perfect-coverage-liquid-concealer--ivory-002/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "flormar.com",
+    "type": "simple",
+    "brand": "Flormar",
+    "example": "https://www.flormar.com/perfect-coverage-liquid-concealer--ivory-002/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "lorealparisusa.com",
+    "type": "variable",
+    "brand": "L'Oréal Paris",
+    "example": "https://www.lorealparisusa.com/makeup/face/concealer/true-match-radiant-serum-concealer",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "lorealparisusa.com",
+    "type": "simple",
+    "brand": "L'Oréal Paris",
+    "example": "https://www.lorealparisusa.com/makeup/face/concealer/true-match-radiant-serum-concealer",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "lorealparis.com.my",
+    "type": "variable",
+    "brand": "My Loreal Paris",
+    "example": "https://www.lorealparis.com.my/infallible/infallible-32h-freshwear-foundation-330",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "vichy-me.com",
+    "type": "variable",
+    "brand": "Vichy",
+    "example": "https://www.vichy-me.com/en-ae/all-products/skincare/face-serums/dryness/mineral-89-booster",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "vichy-me.com",
+    "type": "simple",
+    "brand": "Vichy",
+    "example": "https://www.vichy-me.com/en-ae/all-products/skincare/face-serums/dryness/mineral-89-booster",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "laroche-posay.us",
+    "type": "variable",
+    "brand": "La Roche-Posay",
+    "example": "https://www.laroche-posay.us/our-products/sun/face-sunscreen/anthelios-uv-correct-face-sunscreen-spf-70-with-niacinamide-3606000591035.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "laroche-posay.us",
+    "type": "simple",
+    "brand": "La Roche-Posay",
+    "example": "https://www.laroche-posay.us/our-products/sun/face-sunscreen/anthelios-uv-correct-face-sunscreen-spf-70-with-niacinamide-3606000591035.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "urbancare.ro",
+    "type": "variable",
+    "brand": "Urban Care",
+    "example": "https://urbancare.ro/en/product/biotin-keratin-hair-care-shampoo/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "urbancare.ro",
+    "type": "simple",
+    "brand": "Urban Care",
+    "example": "https://urbancare.ro/en/product/biotin-keratin-hair-care-shampoo/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "urbancare.com.tr",
+    "type": "variable",
+    "brand": "Urban Care TR",
+    "example": "https://urbancare.com.tr/argan-oil-keratin-sac-bakim-kremi-250-ml",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "urbancare.com.tr",
+    "type": "simple",
+    "brand": "Urban Care TR",
+    "example": "https://urbancare.com.tr/argan-oil-keratin-sac-bakim-kremi-250-ml",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "cliqat.com",
+    "type": "variable",
+    "brand": "Urban Care CL",
+    "example": "https://www.cliqat.com/products/urban-care-coconut-coffee-body-wash-500ml",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "cliqat.com",
+    "type": "simple",
+    "brand": "Urban Care CL",
+    "example": "https://www.cliqat.com/products/urban-care-coconut-coffee-body-wash-500ml",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "makeupstore.com",
+    "type": "variable",
+    "brand": "Urban Care S",
+    "example": "https://makeupstore.com/product/761377/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "makeupstore.com",
+    "type": "simple",
+    "brand": "Urban Care S",
+    "example": "https://makeupstore.com/product/761377/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "bielenda.pl",
+    "type": "variable",
+    "brand": "Bielenda",
+    "example": "https://bielenda.pl/en/catalog/firming-peptides/1452-firming-peptides-cream-70",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "bielenda.pl",
+    "type": "simple",
+    "brand": "Bielenda",
+    "example": "https://bielenda.pl/en/catalog/firming-peptides/1452-firming-peptides-cream-70",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "sephora.com",
+    "type": "variable",
+    "brand": "Sephora",
+    "example": "https://www.sephora.com/product/tinted-moisturizer-oil-free-blurred-matte-spf-30-P515711?skuId=2854479&icid2=products%20grid:p515711:product",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "sephora.com",
+    "type": "simple",
+    "brand": "Sephora",
+    "example": "https://www.sephora.com/product/tinted-moisturizer-oil-free-blurred-matte-spf-30-P515711?skuId=2854479&icid2=products%20grid:p515711:product",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "cerave.com",
+    "type": "variable",
+    "brand": "CeraVe",
+    "example": "https://www.cerave.com/skincare/moisturizers/moisturizing-cream",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "cerave.com",
+    "type": "simple",
+    "brand": "CeraVe",
+    "example": "https://www.cerave.com/skincare/moisturizers/moisturizing-cream",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "narscosmetics.com",
+    "type": "variable",
+    "brand": "NARS",
+    "example": "https://www.narscosmetics.com/USA/natural-matte-longwear-foundation/999NAC0000285.html?dwvar_999NAC0000285_color=4251155135&cgid=foundation",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "narscosmetics.com",
+    "type": "simple",
+    "brand": "NARS",
+    "example": "https://www.narscosmetics.com/USA/natural-matte-longwear-foundation/999NAC0000285.html?dwvar_999NAC0000285_color=4251155135&cgid=foundation",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "seventeencosmetics.com",
+    "type": "variable",
+    "brand": "Seventeen Cosmetics",
+    "example": "https://seventeencosmetics.com/en/catalogue/skin-perfect-ultra-coverage-waterproof-foundation_23/?vid=24#All",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "seventeencosmetics.com",
+    "type": "simple",
+    "brand": "Seventeen Cosmetics",
+    "example": "https://seventeencosmetics.com/en/catalogue/skin-perfect-ultra-coverage-waterproof-foundation_23/?vid=24#All",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "radiant-professional.com",
+    "type": "variable",
+    "brand": "Radiant Professional",
+    "example": "https://radiant-professional.com/en/catalogue/NATURAL_FIX_CONCEALER_670/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "radiant-professional.com",
+    "type": "simple",
+    "brand": "Radiant Professional",
+    "example": "https://radiant-professional.com/en/catalogue/NATURAL_FIX_CONCEALER_670/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "misslyn.com",
+    "type": "variable",
+    "brand": "Misslyn Cosmetics",
+    "example": "https://www.misslyn.com/products/made-to-stay-foundation-water-resistant-foundation",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "misslyn.com",
+    "type": "simple",
+    "brand": "Misslyn Cosmetics",
+    "example": "https://www.misslyn.com/products/made-to-stay-foundation-water-resistant-foundation",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "essencemakeup.com",
+    "type": "variable",
+    "brand": "essence makeup",
+    "example": "https://essencemakeup.com/collections/face/products/correct-conceal-under-eye-brightening-concealer",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "essencemakeup.com",
+    "type": "simple",
+    "brand": "essence makeup",
+    "example": "https://essencemakeup.com/collections/face/products/correct-conceal-under-eye-brightening-concealer",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "charlottetilbury.com",
+    "type": "variable",
+    "brand": "Charlotte Tilbury",
+    "example": "https://www.charlottetilbury.com/uk/product/airbrush-flawless-foundation-shade-1-cool?from_multi_product_card=true",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "charlottetilbury.com",
+    "type": "simple",
+    "brand": "Charlotte Tilbury",
+    "example": "https://www.charlottetilbury.com/uk/product/airbrush-flawless-foundation-shade-1-cool?from_multi_product_card=true",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "dior.com",
+    "type": "variable",
+    "brand": "Dior Makeup",
+    "example": "https://www.dior.com/en_int/beauty/products/dior-forever-skin-correct-Y0326000.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "dior.com",
+    "type": "simple",
+    "brand": "Dior Makeup",
+    "example": "https://www.dior.com/en_int/beauty/products/dior-forever-skin-correct-Y0326000.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "summerfridays.com",
+    "type": "variable",
+    "brand": "Summer Fridays",
+    "example": "https://summerfridays.com/products/jet-lag-mask",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "summerfridays.com",
+    "type": "simple",
+    "brand": "Summer Fridays",
+    "example": "https://summerfridays.com/products/jet-lag-mask",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "charactercosmetics.in",
+    "type": "variable",
+    "brand": "Character Cosmetics",
+    "example": "https://charactercosmetics.in/products/character-hyaluronic-acid-high-coverage-foundation",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "charactercosmetics.in",
+    "type": "simple",
+    "brand": "Character Cosmetics",
+    "example": "https://charactercosmetics.in/products/character-hyaluronic-acid-high-coverage-foundation",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "isadora.com",
+    "type": "variable",
+    "brand": "IsaDora",
+    "example": "https://www.isadora.com/products/face/powder/the-no-compromise-matte-longwear-powder/60-neutral-porcelain",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "isadora.com",
+    "type": "simple",
+    "brand": "IsaDora",
+    "example": "https://www.isadora.com/products/face/powder/the-no-compromise-matte-longwear-powder/60-neutral-porcelain",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "topfaceofficial.com",
+    "type": "variable",
+    "brand": "Topface",
+    "example": "https://topfaceofficial.com/products/aqua-tint-lip-cheek",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "topfaceofficial.com",
+    "type": "simple",
+    "brand": "Topface",
+    "example": "https://topfaceofficial.com/products/aqua-tint-lip-cheek",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "makeoverparis.com",
+    "type": "variable",
+    "brand": "MakeOver",
+    "example": "http://makeoverparis.com/en/products.asp?id1=1&id2=8&id3=32",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "makeoverparis.com",
+    "type": "simple",
+    "brand": "MakeOver",
+    "example": "http://makeoverparis.com/en/products.asp?id1=1&id2=8&id3=32",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "clamanti.co.uk",
+    "type": "variable",
+    "brand": "Clamanti",
+    "example": "https://clamanti.co.uk/bielenda-neuro-retinol-advanced-moisturizing-face-serum-30-ml.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "clamanti.co.uk",
+    "type": "simple",
+    "brand": "Clamanti",
+    "example": "https://clamanti.co.uk/bielenda-neuro-retinol-advanced-moisturizing-face-serum-30-ml.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "lacabine.es",
+    "type": "variable",
+    "brand": "laCabine",
+    "example": "https://lacabine.es/en/productos/364-hydranad-biphase-makeup-remover.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "lacabine.es",
+    "type": "simple",
+    "brand": "laCabine",
+    "example": "https://lacabine.es/en/productos/364-hydranad-biphase-makeup-remover.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "brunovassari.com",
+    "type": "variable",
+    "brand": "Bruno Vassari",
+    "example": "https://brunovassari.com/en-row/products/balance-fluid",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "brunovassari.com",
+    "type": "simple",
+    "brand": "Bruno Vassari",
+    "example": "https://brunovassari.com/en-row/products/balance-fluid",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "beesline.com",
+    "type": "variable",
+    "brand": "Beesline",
+    "example": "https://beesline.com/en-jo/products/propolis-facial-wash",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "beesline.com",
+    "type": "simple",
+    "brand": "Beesline",
+    "example": "https://beesline.com/en-jo/products/propolis-facial-wash",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "dermaliscio.net",
+    "type": "variable",
+    "brand": "Dermaliscio",
+    "example": "https://dermaliscio.net/product/hyaluronic-acid-anti-wrinkles-lifting-cream-15000-p-p-m-dermaliscio-shade-50-sunscreen/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "dermaliscio.net",
+    "type": "simple",
+    "brand": "Dermaliscio",
+    "example": "https://dermaliscio.net/product/hyaluronic-acid-anti-wrinkles-lifting-cream-15000-p-p-m-dermaliscio-shade-50-sunscreen/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "babaria.es",
+    "type": "variable",
+    "brand": "Babaria",
+    "example": "https://babaria.es/en/producto/face-serum-collagen/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "babaria.es",
+    "type": "simple",
+    "brand": "Babaria",
+    "example": "https://babaria.es/en/producto/face-serum-collagen/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "sarahk.com.br",
+    "type": "variable",
+    "brand": "Sarah K",
+    "example": "https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "sarahk.com.br",
+    "type": "simple",
+    "brand": "Sarah K",
+    "example": "https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "sarahkinternational.com",
+    "type": "variable",
+    "brand": "Sarah K International",
+    "example": "https://sarahkinternational.com/product/acondicionador-treatment/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "sarahkinternational.com",
+    "type": "simple",
+    "brand": "Sarah K International",
+    "example": "https://sarahkinternational.com/product/acondicionador-treatment/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "sarahkstore.com",
+    "type": "variable",
+    "brand": "Sarah K Store",
+    "example": "https://sarahkstore.com/product/blends-bb-cream-250ml/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "sarahkstore.com",
+    "type": "simple",
+    "brand": "Sarah K Store",
+    "example": "https://sarahkstore.com/product/blends-bb-cream-250ml/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "sheamiracles.com",
+    "type": "variable",
+    "brand": "Shea Miracles",
+    "example": "https://sheamiracles.com/shea-hair-conditioner-300ml-1.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "sheamiracles.com",
+    "type": "simple",
+    "brand": "Shea Miracles",
+    "example": "https://sheamiracles.com/shea-hair-conditioner-300ml-1.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "skalabrasil.com",
+    "type": "variable",
+    "brand": "Skala Brasil",
+    "example": "https://skalabrasil.com/en/product/amido-de-milho-573",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "skalabrasil.com",
+    "type": "simple",
+    "brand": "Skala Brasil",
+    "example": "https://skalabrasil.com/en/product/amido-de-milho-573",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "dermoconcept.pl",
+    "type": "variable",
+    "brand": "Skinarte",
+    "example": "https://dermoconcept.pl/kremy-zele-do-twarzy/14865-skinarte-resurfacing-smoothsebcontrol-cream-50ml-5902169052980.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "dermoconcept.pl",
+    "type": "simple",
+    "brand": "Skinarte",
+    "example": "https://dermoconcept.pl/kremy-zele-do-twarzy/14865-skinarte-resurfacing-smoothsebcontrol-cream-50ml-5902169052980.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "beautyboxjo.com",
+    "type": "variable",
+    "brand": "Beauty Box",
+    "example": "https://beautyboxjo.com/products/makeover-sheer-bronzing-powder",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "beautyboxjo.com",
+    "type": "simple",
+    "brand": "Beauty Box",
+    "example": "https://beautyboxjo.com/products/makeover-sheer-bronzing-powder",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "easypara.com",
+    "type": "variable",
+    "brand": "SVR 1",
+    "example": "https://www.easypara.com/easy-stick-spf50-10ml-sun-secure-svr.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "easypara.com",
+    "type": "simple",
+    "brand": "SVR 1",
+    "example": "https://www.easypara.com/easy-stick-spf50-10ml-sun-secure-svr.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "olaplex.com",
+    "type": "variable",
+    "brand": "Olaplex",
+    "example": "https://olaplex.com/products/n-3plus-complete-repair-treatment",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "olaplex.com",
+    "type": "simple",
+    "brand": "Olaplex",
+    "example": "https://olaplex.com/products/n-3plus-complete-repair-treatment",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "diegodallapalma.com",
+    "type": "variable",
+    "brand": "Diego dalla Palma",
+    "example": "https://diegodallapalma.com/en/products/matita-sopracciglia-alta-precisione-resistente-all-acqua-lunga-tenuta-df12001-master",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "diegodallapalma.com",
+    "type": "simple",
+    "brand": "Diego dalla Palma",
+    "example": "https://diegodallapalma.com/en/products/matita-sopracciglia-alta-precisione-resistente-all-acqua-lunga-tenuta-df12001-master",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "eucerin-me.com",
+    "type": "variable",
+    "brand": "Eucerin",
+    "example": "https://www.en.eucerin-me.com/products/dermopure-clinical/scrub",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "eucerin-me.com",
+    "type": "simple",
+    "brand": "Eucerin",
+    "example": "https://www.en.eucerin-me.com/products/dermopure-clinical/scrub",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "isdin.com",
+    "type": "variable",
+    "brand": "ISDIN",
+    "example": "https://www.isdin.com/en-AE/product/isdinceutics/age-reverse-night",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "isdin.com",
+    "type": "simple",
+    "brand": "ISDIN",
+    "example": "https://www.isdin.com/en-AE/product/isdinceutics/age-reverse-night",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "bioderma.ae",
+    "type": "variable",
+    "brand": "Bioderma",
+    "example": "https://www.bioderma.ae/our-products/atoderm/creme",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "bioderma.ae",
+    "type": "simple",
+    "brand": "Bioderma",
+    "example": "https://www.bioderma.ae/our-products/atoderm/creme",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "isispharma.com",
+    "type": "variable",
+    "brand": "Isispharma",
+    "example": "https://www.isispharma.com/en/product/ato-balm/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "isispharma.com",
+    "type": "simple",
+    "brand": "Isispharma",
+    "example": "https://www.isispharma.com/en/product/ato-balm/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "labo-acm.com",
+    "type": "variable",
+    "brand": "ACM Laboratoire",
+    "example": "https://labo-acm.com/en/products/shine-reducing-skincare",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "labo-acm.com",
+    "type": "simple",
+    "brand": "ACM Laboratoire",
+    "example": "https://labo-acm.com/en/products/shine-reducing-skincare",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "uriage.com",
+    "type": "variable",
+    "brand": "Uriage Eau Thermale",
+    "example": "https://www.uriage.com/MT/en/products/unctuous-body-balm",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "uriage.com",
+    "type": "simple",
+    "brand": "Uriage Eau Thermale",
+    "example": "https://www.uriage.com/MT/en/products/unctuous-body-balm",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "filorga.com",
+    "type": "variable",
+    "brand": "Filorga Laboratoires Paris",
+    "example": "https://int.filorga.com/products/ncef-revitalize-creme",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "filorga.com",
+    "type": "simple",
+    "brand": "Filorga Laboratoires Paris",
+    "example": "https://int.filorga.com/products/ncef-revitalize-creme",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "sebamed.com",
+    "type": "variable",
+    "brand": "Seba Med",
+    "example": "https://sebamed.com/en/p/antibacterial-cleansing-foam/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "sebamed.com",
+    "type": "simple",
+    "brand": "Seba Med",
+    "example": "https://sebamed.com/en/p/antibacterial-cleansing-foam/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "al-dawaa.com",
+    "type": "variable",
+    "brand": "Creme 21",
+    "example": "https://www.al-dawaa.com/en/p/209943/creame-21-body-lotion-ultra-dry-skin-almond-oil-600-ml",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "al-dawaa.com",
+    "type": "simple",
+    "brand": "Creme 21",
+    "example": "https://www.al-dawaa.com/en/p/209943/creame-21-body-lotion-ultra-dry-skin-almond-oil-600-ml",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "macadamiahair.com",
+    "type": "variable",
+    "brand": "Macadamia Hair",
+    "example": "https://www.macadamiahair.com/products/healing-oil-spray",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "macadamiahair.com",
+    "type": "simple",
+    "brand": "Macadamia Hair",
+    "example": "https://www.macadamiahair.com/products/healing-oil-spray",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "cantubeauty.com",
+    "type": "variable",
+    "brand": "Cantu Shea Beauty",
+    "example": "https://www.cantubeauty.com/products/curls-coils-waves/coconut-curling-cream/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "cantubeauty.com",
+    "type": "simple",
+    "brand": "Cantu Shea Beauty",
+    "example": "https://www.cantubeauty.com/products/curls-coils-waves/coconut-curling-cream/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "tajclass.com",
+    "type": "simple",
+    "brand": "Taj Class",
+    "example": "https://tajclass.com/products/mascara-i-love-extreme-crazy-volume-essence",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "makeoverpakistan.com",
+    "type": "variable",
+    "brand": "Makeover Pakistan",
+    "example": "https://www.makeoverpakistan.com/shop/high-perfection-foundation",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "caretobeauty.com",
+    "type": "variable",
+    "brand": "Care To Beauty",
+    "example": "https://www.caretobeauty.com/jo/bell-hypoallergenic-soft-cream-concealer-02-vanilla-5-5g/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "caretobeauty.com",
+    "type": "simple",
+    "brand": "Care To Beauty",
+    "example": "https://www.caretobeauty.com/jo/bell-hypoallergenic-soft-cream-concealer-02-vanilla-5-5g/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "notino.co.uk",
+    "type": "variable",
+    "brand": "Notino",
+    "example": "https://www.notino.co.uk/mac-cosmetics/macximal-sleek-satin-lipstick-mini-satin-lipstick-for-the-perfect-look/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "notino.co.uk",
+    "type": "simple",
+    "brand": "Notino",
+    "example": "https://www.notino.co.uk/mac-cosmetics/macximal-sleek-satin-lipstick-mini-satin-lipstick-for-the-perfect-look/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "dumyah.com",
+    "type": "variable",
+    "brand": "Dumyah",
+    "example": "https://www.dumyah.com/en/beauty/hair-body-amp-skin-care/facial-care/natural-glow-facial-moisturizing-cream",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "dumyah.com",
+    "type": "simple",
+    "brand": "Dumyah",
+    "example": "https://www.dumyah.com/en/beauty/hair-body-amp-skin-care/facial-care/natural-glow-facial-moisturizing-cream",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "semsem.me",
+    "type": "variable",
+    "brand": "Semsem",
+    "example": "https://semsem.me/jo_en/nem-collagen-natural-eggshell-membrane-capsule-30-caps.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "semsem.me",
+    "type": "simple",
+    "brand": "Semsem",
+    "example": "https://semsem.me/jo_en/nem-collagen-natural-eggshell-membrane-capsule-30-caps.html",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "galaxus.ch",
+    "type": "variable",
+    "brand": "Galaxus",
+    "example": "https://www.galaxus.ch/de/s6/product/avene-dermabsolu-serum-30-ml-gesichtsserum-49739066",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "galaxus.ch",
+    "type": "simple",
+    "brand": "Galaxus",
+    "example": "https://www.galaxus.ch/de/s6/product/avene-dermabsolu-serum-30-ml-gesichtsserum-49739066",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "carrefouruae.com",
+    "type": "variable",
+    "brand": "Carrefour",
+    "example": "https://www.carrefouruae.com/mafuae/en/foundations/l-oreal-inf-liq-fou-0130-beige/p/1159838",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "carrefouruae.com",
+    "type": "simple",
+    "brand": "Carrefour",
+    "example": "https://www.carrefouruae.com/mafuae/en/foundations/l-oreal-inf-liq-fou-0130-beige/p/1159838",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "enzoitaly.com",
+    "type": "variable",
+    "brand": "Enzo",
+    "example": "https://www.enzoitaly.com/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "enzoitaly.com",
+    "type": "simple",
+    "brand": "Enzo",
+    "example": "https://www.enzoitaly.com/",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "celenesbysweden.com",
+    "type": "variable",
+    "brand": "Celenes",
+    "example": "https://int.celenesbysweden.com/products/thermal-daily-care-gel-cream",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "celenesbysweden.com",
+    "type": "simple",
+    "brand": "Celenes",
+    "example": "https://int.celenesbysweden.com/products/thermal-daily-care-gel-cream",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "everymarket.com",
+    "type": "variable",
+    "brand": "Everymarket",
+    "example": "https://everymarket.com/products/elf-cosmetics-moisturizing-lipstick-provides-vibrant-color-and-luminous-shine-flirty-and-fabulous",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "everymarket.com",
+    "type": "simple",
+    "brand": "Everymarket",
+    "example": "https://everymarket.com/products/elf-cosmetics-moisturizing-lipstick-provides-vibrant-color-and-luminous-shine-flirty-and-fabulous",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "musejo.com",
+    "type": "variable",
+    "brand": "Clara",
+    "example": "https://musejo.com/products/clara-line-nail-polish",
+    "is_predefined": true,
+    "code": null
+  },
+  {
+    "domain": "musejo.com",
+    "type": "simple",
+    "brand": "Clara",
+    "example": "https://musejo.com/products/clara-line-nail-polish",
+    "is_predefined": true,
+    "code": null
+  }
+]

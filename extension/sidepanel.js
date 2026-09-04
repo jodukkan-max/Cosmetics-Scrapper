@@ -1,143 +1,41 @@
 'use strict';
 
-const VARIABLE_COLUMNS = ['ID','Parent','Type','SKU','Name','tags','Product URL','Images','Description','Short Description','Categories','Regular Price','Sale Price','Attribute 1 name','Attribute 1 value(s)','Attribute 1 visible','Attribute 1 global','Color Code','Rey Swatches'];
-const SIMPLE_COLUMNS = ['SKU','Name','tags','Product URL','Description','Short Description','Regular Price','Categories','Images','Sale Price'];
+const VARIABLE_COLUMNS = ['ID','Parent','Type','SKU','Name','Images','Description','Regular Price','Attribute 1 name','Attribute 1 value(s)','Attribute 2 name','Attribute 2 value(s)','Attribute 1 visible','Attribute 1 global','Color Code','Rey Swatches'];
+const SIMPLE_COLUMNS = ['SKU','Name','Description','Regular Price','Images'];
 
 let currentRows = [];
 let currentType = 'variable';
 let COLUMNS = VARIABLE_COLUMNS;
 let editingStoreId = null;
 let selectedIds = new Set();
-let defaultMode = 'all';
 
-let discoverCategories = [];
+// ── New scraper workflow state ────────────────────────────────────────────────
+let currentDomain = '';       // domain of the active tab
+let currentHasSimple = false; // whether a simple scraper exists for it
+let currentHasVariable = false; // whether a variable scraper exists for it
+let pendingType = '';         // 'simple' | 'variable' for the AI scraper being built
+let pendingBody = '';         // the generated (unsaved) scraper code
+let pendingUrl = '';          // URL used for generation
+let chatHistory = [];         // [{role:'user'|'agent', content}] for the fix chat
 
 const $ = id => document.getElementById(id);
 const escHtml = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-function detectSite(url) {
-  try {
-    const h = new URL(url).hostname.replace(/^www\./, '');
-    const map = { 'elfcosmetics.com':'e.l.f.','maybelline.com':'Maybelline','hudabeauty.com':'Huda Beauty','flormar.com':'Flormar','lorealparisusa.com':"L'Oréal Paris",'lorealparis.com.my':'My Loreal Paris','vichy-me.com':'Vichy','pastelarabia.com':'Pastel','laroche-posay.us':'La Roche-Posay','urbancare.ro':'Urban Care','urbancare.com.tr':'Urban Care TR','cliqat.com':'Urban Care CL','bielenda.pl':'Bielenda','makeupstore.com':'Urban Care S','sephora.com':'Sephora','cerave.com':'CeraVe','narscosmetics.com':'NARS','glowrecipe.com':'Glow Recipe','seventeencosmetics.com':'Seventeen','inglotcosmetics.com':'Inglot','clamanti.co.uk':'Clamanti','lacabine.es':'laCabine','brunovassari.com':'Bruno Vassari','beesline.com':'Beesline','dermaliscio.net':'Dermaliscio','babaria.es':'Babaria','sarahk.com.br':'Sarah K','sarahkinternational.com':'Sarah K International','sarahkstore.com':'Sarah K Store','sheamiracles.com':'Shea Miracles','skalabrasil.com':'Skala Brasil','dermoconcept.pl':'Skinarte','beautyboxjo.com':'Beauty Box','easypara.com':'SVR 1','olaplex.com':'Olaplex','macadamiahair.com':'Macadamia Hair','diegodallapalma.com':'Diego dalla Palma','eucerin-me.com':'Eucerin','isdin.com':'ISDIN','bioderma.ae':'Bioderma','isispharma.com':'Isispharma','labo-acm.com':'ACM','uriage.com':'Uriage','filorga.com':'Filorga','sebamed.com':'Seba Med','cantubeauty.com':'Cantu Beauty','al-dawaa.com':'Creme 21','tajclass.com':'Taj Class','makeoverpakistan.com':'Makeover Pakistan','caretobeauty.com':'Care To Beauty','notino.co.uk':'Notino','maybelline.co.za':'Maybelline SA','dumyah.com':'Dumyah', 'semsem.me':'Semsem', 'galaxus.ch':'Galaxus', 'carrefouruae.com':'Carrefour', 'enzoitaly.com':'Enzo', 'celenesbysweden.com':'Celenes', 'everymarket.com':'Everymarket', 'musejo.com':'Clara' };
-    for (const d in map) if (h === d || h.endsWith('.' + d)) return map[d];
-  } catch (e) {}
-  return '';
-}
-
-// I── Tabs (Products / Bulk / Stores / Categories) I───────────────────────────
+// I── Tabs (Products / Stores / Websites) I───────────────────────────
 document.querySelectorAll('.sp-tab').forEach(btn => btn.addEventListener('click', () => {
   const tab = btn.dataset.tab;
   document.querySelectorAll('.sp-tab').forEach(b => b.classList.toggle('active', b === btn));
   $('panel-products').classList.toggle('hidden', tab !== 'products');
-  $('panel-bulk').classList.toggle('hidden', tab !== 'bulk');
   $('panel-stores').classList.toggle('hidden', tab !== 'stores');
-  $('panel-categories').classList.toggle('hidden', tab !== 'categories');
+  $('panel-websites').classList.toggle('hidden', tab !== 'websites');
   if (tab === 'stores') renderStores();
-  if (tab === 'bulk') refreshBulkUI();
-  if (tab === 'categories') renderCategories();
+  if (tab === 'websites') renderBrands();
 }));
 
-// ═══ Category management ══════════════════════════════════════════════════════
-// Persisted as { id, name, parentId } (parentId = '' for top-level)
-let catList = [];
-
-async function loadCategories() {
-  const d = await chrome.storage.local.get('categories');
-  catList = d.categories || [];
-}
-async function saveCategories() {
-  await chrome.storage.local.set({ categories: catList });
-}
-
-function catNextId() {
-  let max = 0;
-  for (const c of catList) if (c.id > max) max = c.id;
-  return max + 1;
-}
-
-// Flatten nested categories into "Parent > Child" display strings for multi-select
-function flatCategoryOptions() {
-  const flat = [];
-  function walk(parentId, prefix) {
-    const children = catList.filter(c => c.parentId === parentId);
-    for (const c of children) {
-      const label = prefix ? prefix + ' > ' + c.name : c.name;
-      flat.push({ label, value: label });
-      walk(c.id, label);
-    }
-  }
-  walk('', '');
-  return flat;
-}
-
-function renderCategories() {
-  loadCategories().then(() => {
-    const ul = $('cat-list');
-    const empty = $('cat-empty');
-    const sel = $('cat-parent-select');
-
-    // Build parent select options
-    const topCats = catList.filter(c => !c.parentId);
-    sel.innerHTML = '<option value="">— Top-level —</option>' +
-      topCats.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
-
-    if (!catList.length) {
-      ul.innerHTML = '';
-      ul.classList.add('hidden');
-      empty.classList.remove('hidden');
-      return;
-    }
-    ul.classList.remove('hidden');
-    empty.classList.add('hidden');
-
-    // Render tree: top-level with children indented
-    function renderSub(cats, depth) {
-      return cats.map(c => {
-        const children = catList.filter(ch => ch.parentId === c.id);
-        return `<li class="cat-item" style="padding-left:${8 + depth * 20}px">
-          <span class="cat-name">${escHtml(c.name)}</span>
-          <button class="cat-del-btn" data-id="${c.id}">Delete</button>
-          ${children.length ? renderSub(children, depth + 1) : ''}
-        </li>`;
-      }).join('\n');
-    }
-    ul.innerHTML = `<ul class="cat-tree">${renderSub(topCats, 0)}</ul>`;
-
-    // Delete handlers
-    ul.querySelectorAll('.cat-del-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const id = Number(btn.dataset.id);
-        // Also remove children
-        catList = catList.filter(c => c.id !== id && c.parentId !== id);
-        await saveCategories();
-        renderCategories();
-      });
-    });
-  });
-}
-
-$('cat-add-btn').addEventListener('click', async () => {
-  const name = $('cat-name-input').value.trim();
-  if (!name) return;
-  const parentId = $('cat-parent-select').value ? Number($('cat-parent-select').value) : '';
-  catList.push({ id: catNextId(), name, parentId });
-  await saveCategories();
-  $('cat-name-input').value = '';
-  $('cat-parent-select').value = '';
-  renderCategories();
-});
-
-// Load categories on startup
-loadCategories();
-
-// ═══ Product type ═══════════════════════════════════════════════════════════
-$('type-variable').addEventListener('click', () => setType('variable'));
-$('type-simple').addEventListener('click', () => setType('simple'));
+// ═══ Product type (auto-detected from the scrape result) ══════════════════════
 function setType(t) {
   currentType = t;
   COLUMNS = t === 'simple' ? SIMPLE_COLUMNS : VARIABLE_COLUMNS;
-  $('type-variable').classList.toggle('active', t === 'variable');
-  $('type-simple').classList.toggle('active', t === 'simple');
 }
 
 // ═══ Active-tab detection ═════════════════════════════════════════════════════
@@ -145,34 +43,334 @@ async function activeTab() {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   return tab;
 }
-async function refreshHint() {
-  const tab = await activeTab();
-  const site = tab && tab.url ? detectSite(tab.url) : '';
-  $('site-hint').textContent = site ? `Current page: ${site}` : 'Open a product page, or paste a URL below.';
-}
-refreshHint();
-chrome.tabs.onActivated.addListener(refreshHint);
-chrome.tabs.onUpdated.addListener(refreshHint);
 
-// ═══ Scrape ═══════════════════════════════════════════════════════════════════
-$('scrape-page-btn').addEventListener('click', async () => {
+// ═══ Scraper status detection (does this website already have a scraper?) ═══
+function domainOfUrl(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch (e) { return ''; }
+}
+
+async function refreshScraperStatus() {
+  const tab = await activeTab();
+  if (!tab || !tab.url || !/^https?:/i.test(tab.url)) return;
+  const domain = domainOfUrl(tab.url);
+  if (!domain) return;
+  currentDomain = domain;
+  let hasSimple = false, hasVariable = false;
+  try {
+    const rows = self.Supabase ? await self.Supabase.listScrapersForDomain(domain) : [];
+    if (Array.isArray(rows)) {
+      hasSimple = rows.some(r => r.type === 'simple');
+      hasVariable = rows.some(r => r.type === 'variable');
+    }
+  } catch (e) {}
+  currentHasSimple = hasSimple;
+  currentHasVariable = hasVariable;
+  updateHeroButtons();
+}
+
+function updateHeroButtons() {
+  const scrapeVariable = $('scrape-variable-btn');
+  const scrapeSimple = $('scrape-simple-btn');
+  const addVariable = $('add-variable-btn');
+  const addSimple = $('add-simple-btn');
+  const addGeneric = $('add-scraper-btn');
+
+  // A site with a scraper for BOTH types shows two "Scrape" buttons.
+  // A site with only ONE type shows that "Scrape" button + an "Add the other" button.
+  // A site with NO scraper shows the generic "Add Scrapper" button.
+  if (currentHasVariable && currentHasSimple) {
+    scrapeVariable.classList.remove('hidden');
+    scrapeSimple.classList.remove('hidden');
+    addVariable.classList.add('hidden');
+    addSimple.classList.add('hidden');
+    addGeneric.classList.add('hidden');
+  } else if (currentHasVariable) {
+    scrapeVariable.classList.remove('hidden');
+    scrapeSimple.classList.add('hidden');
+    addVariable.classList.add('hidden');
+    addSimple.classList.remove('hidden'); // add the missing simple scraper
+    addGeneric.classList.add('hidden');
+  } else if (currentHasSimple) {
+    scrapeVariable.classList.add('hidden');
+    scrapeSimple.classList.remove('hidden');
+    addVariable.classList.remove('hidden'); // add the missing variable scraper
+    addSimple.classList.add('hidden');
+    addGeneric.classList.add('hidden');
+  } else {
+    scrapeVariable.classList.add('hidden');
+    scrapeSimple.classList.add('hidden');
+    addVariable.classList.add('hidden');
+    addSimple.classList.add('hidden');
+    addGeneric.classList.remove('hidden');
+  }
+}
+
+// Reset transient state before starting a fresh scrape / generation.
+function resetForNewScrape() {
+  hideSaveRow();
+  hideDeepThink();
+  hideChat();
+  hideTypeSelector();
+  hideAgentWorking();
+  pendingBody = '';
+  pendingType = '';
+  pendingUrl = '';
+  chatHistory = [];
+}
+
+// ═══ Scrape (existing scraper) ═══════════════════════════════════════════════
+async function scrapeWithType(productType) {
   const tab = await activeTab();
   if (!tab) return status('error', 'No active tab.');
-  runScrape({ mode: 'active', productType: currentType, tabId: tab.id, url: tab.url });
+  resetForNewScrape();
+  $('hero-title').classList.add('hidden');
+  $('panel-products').classList.add('has-results');
+  $('hero').classList.remove('hero-error');
+  runScrape({ mode: 'active', productType, tabId: tab.id, url: tab.url });
+}
+
+$('scrape-variable-btn').addEventListener('click', () => scrapeWithType('variable'));
+$('scrape-simple-btn').addEventListener('click', () => scrapeWithType('simple'));
+
+// ═══ Add Scrapper (AI) ═══════════════════════════════════════════════════════
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg && msg.type === 'agentThinking') setAgentThought(msg.text || '');
 });
-$('scrape-url-btn').addEventListener('click', () => {
-  const url = $('product-url').value.trim();
-  if (!url) return;
-  runScrape({ mode: 'url', productType: currentType, url });
+
+function setAgentThought(text) {
+  const el = $('agent-thought');
+  if (!el) return;
+  if (!text) { el.classList.add('hidden'); el.textContent = ''; return; }
+  el.textContent = text;
+  el.classList.remove('hidden');
+}
+
+function showAgentWorking() { $('agent-working').classList.remove('hidden'); setAgentThought(''); }
+function hideAgentWorking() { $('agent-working').classList.add('hidden'); setAgentThought(''); }
+
+// Cancel while the agent is working (generation or chat fix).
+$('agent-cancel-btn').addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'cancelGenerate' });
+  status('warn', 'Cancelling…');
 });
-$('product-url').addEventListener('keydown', e => { if (e.key === 'Enter') $('scrape-url-btn').click(); });
+
+// Clicking "Add Scrapper" (no scraper exists) asks whether the product is simple or variable.
+$('add-scraper-btn').addEventListener('click', async () => {
+  const tab = await activeTab();
+  if (!tab) return status('error', 'No active tab.');
+  resetForNewScrape();
+  $('hero-title').classList.add('hidden');
+  $('panel-products').classList.add('has-results');
+  $('hero').classList.remove('hero-error');
+  showTypeSelector();
+});
+
+// Clicking "Add variable Scrapper" / "Add simple Scrapper" (the OTHER type is
+// missing) skips the selector and goes straight to generation of that type.
+$('add-variable-btn').addEventListener('click', () => beginAddScraper('variable'));
+$('add-simple-btn').addEventListener('click', () => beginAddScraper('simple'));
+
+function beginAddScraper(type) {
+  resetForNewScrape();
+  $('hero-title').classList.add('hidden');
+  $('panel-products').classList.add('has-results');
+  $('hero').classList.remove('hero-error');
+  startAddScraper(type);
+}
+
+function showTypeSelector() {
+  $('type-selector').classList.remove('hidden');
+  $('add-scraper-btn').classList.add('hidden');
+}
+function hideTypeSelector() { $('type-selector').classList.add('hidden'); }
+
+$('type-simple-btn').addEventListener('click', () => startAddScraper('simple'));
+$('type-variable-btn').addEventListener('click', () => startAddScraper('variable'));
+
+async function startAddScraper(type) {
+  const tab = await activeTab();
+  if (!tab) return status('error', 'No active tab.');
+  hideTypeSelector();
+  pendingType = type;
+  pendingUrl = tab.url;
+  chatHistory = [];
+  hideSaveRow();
+  hideDeepThink();
+  hideChat();
+  showAgentWorking();
+  status('loading', 'The AI is building a ' + (type === 'variable' ? 'variable' : 'simple') + ' scraper for this site…');
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'generateScraper', tabId: tab.id, url: tab.url, productType: type });
+    if (chrome.runtime.lastError) throw new Error(chrome.runtime.lastError.message);
+    if (res && res.cancelled) { hideAgentWorking(); status('warn', 'Cancelled.'); return; }
+    if (!res || !res.ok) throw new Error((res && res.error) || 'Generation failed');
+    pendingBody = res.body || '';
+    currentRows = res.rows || [];
+    // Trust the user's explicit choice (not row sniffing) for the table type.
+    setType(pendingType === 'variable' ? 'variable' : 'simple');
+    hideAgentWorking();
+    $('status').classList.add('hidden');
+    renderResults(res.title || '');
+    showSaveRow();
+    showDeepThink();
+  } catch (e) {
+    hideAgentWorking();
+    status('error', e.message);
+  }
+}
 
 function status(type, msg) { const el = $('status'); el.className = `status ${type}`; el.textContent = msg; el.classList.remove('hidden'); }
+
+// ═══ Save row (shown after the AI scraper is generated) ══════════════════════
+function showSaveRow() { $('save-row').classList.remove('hidden'); }
+function hideSaveRow() { $('save-row').classList.add('hidden'); }
+
+// ═══ Deep re-analysis ("Use deep thinking") → opens the conversational chat ═══
+function showDeepThink() { $('deep-think').classList.remove('hidden'); }
+function hideDeepThink() { $('deep-think').classList.add('hidden'); }
+
+$('deep-think-btn').addEventListener('click', () => {
+  hideDeepThink();
+  openChat();
+});
+
+// ═══ Conversational chat to fix the scraped data ══════════════════════════════
+function openChat() {
+  if (!pendingBody) return;
+  hideDeepThink();
+  $('chat-panel').classList.remove('hidden');
+  $('chat-messages').innerHTML = '';
+  addChatMessage('agent', 'I scraped this ' + (pendingType === 'variable' ? 'variable' : 'simple') + ' product — the table shows what I found. Tell me what looks wrong (wrong price, missing variants, wrong images, etc.) and I\'ll look into it.');
+  $('chat-status').className = 'status hidden';
+  $('save-row').classList.remove('hidden');
+}
+
+function hideChat() {
+  $('chat-panel').classList.add('hidden');
+}
+
+function addChatMessage(role, content) {
+  const wrap = $('chat-messages');
+  if (!wrap) return;
+  const div = document.createElement('div');
+  div.className = 'chat-msg ' + role;
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble';
+  bubble.textContent = content;
+  div.appendChild(bubble);
+  wrap.appendChild(div);
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+function chatStatus(type, msg) {
+  const el = $('chat-status');
+  if (type === 'hidden') { el.className = 'status hidden'; el.textContent = ''; return; }
+  el.className = `status ${type}`;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+async function sendChat() {
+  const input = $('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+  if (!pendingBody) return;
+  input.value = '';
+  addChatMessage('user', text);
+  chatHistory.push({ role: 'user', content: text });
+  chatStatus('loading', 'The agent is thinking…');
+  $('chat-send-btn').disabled = true;
+  try {
+    const tab = await activeTab();
+    if (!tab) throw new Error('No active tab.');
+    const res = await chrome.runtime.sendMessage({
+      type: 'chatFixScraper',
+      tabId: tab.id,
+      url: pendingUrl || tab.url,
+      productType: pendingType,
+      feedback: text,
+      history: chatHistory.slice(0, -1),
+      body: pendingBody,
+      rows: currentRows,
+    });
+    if (chrome.runtime.lastError) throw new Error(chrome.runtime.lastError.message);
+    if (res && res.cancelled) { chatStatus('warn', 'Cancelled.'); return; }
+    if (!res || !res.ok) throw new Error((res && res.error) || 'The agent could not reply');
+
+    if (res.changed) {
+      pendingBody = res.body || pendingBody;
+      currentRows = res.rows || [];
+      setType(pendingType === 'variable' ? 'variable' : 'simple');
+      renderResults(res.title || '');
+    }
+
+    const reply = res.reply || 'Done.';
+    chatHistory.push({ role: 'agent', content: reply });
+    addChatMessage('agent', reply);
+    chatStatus('hidden');
+  } catch (e) {
+    chatStatus('error', e.message);
+  } finally {
+    $('chat-send-btn').disabled = false;
+  }
+}
+
+$('chat-send-btn').addEventListener('click', sendChat);
+$('chat-input').addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
+
+// ═══ Add to scrappers (save) ══════════════════════════════════════════════════
+$('add-to-scrapers-btn').addEventListener('click', async () => {
+  if (!pendingBody || !pendingType) return status('error', 'Nothing to save.');
+  status('loading', 'Saving scraper…');
+  try {
+    const tab = await activeTab();
+    const url = pendingUrl || (tab && tab.url) || '';
+    const res = await chrome.runtime.sendMessage({
+      type: 'saveScraper',
+      url,
+      productType: pendingType,
+      body: pendingBody,
+      example: url,
+    });
+    if (chrome.runtime.lastError) throw new Error(chrome.runtime.lastError.message);
+    if (!res || !res.ok) throw new Error((res && res.error) || 'Save failed');
+    hideSaveRow();
+    status('success', 'Scraper added for this website (' + pendingType + ').');
+    brandsRendered = false;
+    await refreshScraperStatus();
+  } catch (e) {
+    status('error', e.message);
+  }
+});
+
+// "Cancel" beside "Add to scrappers" — abandons the AI scraper and returns to
+// the initial hero state.
+$('cancel-scraper-btn').addEventListener('click', resetToHero);
+
+function resetToHero() {
+  hideSaveRow();
+  hideDeepThink();
+  hideChat();
+  hideTypeSelector();
+  hideAgentWorking();
+  pendingBody = '';
+  pendingType = '';
+  pendingUrl = '';
+  chatHistory = [];
+  currentRows = [];
+  $('results').classList.add('hidden');
+  $('type-badge').classList.add('hidden');
+  $('status').classList.add('hidden');
+  $('hero-title').classList.remove('hidden');
+  $('panel-products').classList.remove('has-results');
+  $('hero').classList.remove('hero-error');
+  refreshScraperStatus();
+}
 
 function brandFromUrl(url) {
   try {
     const host = new URL(url).hostname.replace(/^www\./, '');
-    const brands = (self.ProductScraper && self.ProductScraper.brands) || [];
+    const brands = (self.BrandCatalog && self.BrandCatalog.brands) || [];
     const hit = brands.find(b => host === b.domain || host.endsWith('.' + b.domain));
     if (hit) return hit.name;
   } catch (e) {}
@@ -181,6 +379,7 @@ function brandFromUrl(url) {
 
 async function runScrape(req) {
   $('results').classList.add('hidden');
+  $('type-badge').classList.add('hidden');
   status('loading', 'Scraping…');
   try {
     const res = await chrome.runtime.sendMessage(Object.assign({ type: 'scrape' }, req));
@@ -190,12 +389,24 @@ async function runScrape(req) {
     if (currentRows.length > 0) {
       setType(currentRows[0].hasOwnProperty('Type') ? 'variable' : 'simple');
     }
-    const brand = brandFromUrl(req.url || '');
-    currentRows.forEach(r => { r.tags = brand; r['Product URL'] = req.url || ''; r.Categories = r.Categories || ''; });
+    const brand = res.brand || brandFromUrl(req.url || '');
+    // Show the detected type only for known/listed sites.
+    if (brand && currentRows.length > 0) {
+      const badge = $('type-badge');
+      badge.textContent = currentType === 'simple' ? 'Simple product' : 'Variable product';
+      badge.classList.remove('hidden');
+    }
     $('status').classList.add('hidden');
     renderResults(res.title || '');
+    return true;
   } catch (e) {
+    if (/cannot access/i.test(e.message || '')) {
+      $('hero-title').classList.remove('hidden');
+      $('panel-products').classList.remove('has-results');
+      $('hero').classList.add('hero-error');
+    }
     status('error', e.message);
+    return false;
   }
 }
 
@@ -206,20 +417,25 @@ function buildReySwatches(parentRow, rows) {
   const attrName = (parentRow['Attribute 1 name'] || 'Color').toLowerCase();
   const parentRef = `id:${parentRow.ID}`;
   const variations = rows.filter(r => r.Type === 'variation' && r.Parent === parentRef);
-  const isImageSwatch = variations.some(v => (v['Color Code'] || '').trim().startsWith('http'));
+  // Swatches are driven by the DATA, not the attribute name: if any variant
+  // carries a hex code or a swatch image URL, this is a swatched attribute.
+  const hasImage = variations.some(v => (v['Color Code'] || '').trim().startsWith('http'));
+  const hasHex = variations.some(v => (v['Color Code'] || '').trim().startsWith('#'));
+  if (!hasImage && !hasHex) return '';
   const terms = {};
   for (const v of variations) {
     const colorName = v['Attribute 1 value(s)'];
     const cc = (v['Color Code'] || '').trim();
     if (!colorName) continue;
-    terms[colorName] = isImageSwatch
+    terms[colorName] = hasImage
       ? { name: colorName, rey_attribute_image: cc }
       : { name: colorName, rey_attribute_color: cc || '#000000' };
   }
-  if (isImageSwatch) return JSON.stringify({ Image: { name: 'Image', type: 'rey_image', terms } });
-  // Only generate color swatches when the attribute is "Color"
-  if (attrName.toLowerCase() !== 'color') return '';
-  return JSON.stringify({ [attrName]: { name: attrName, type: 'rey_color', terms } });
+  if (hasImage) return JSON.stringify({ Image: { name: 'Image', type: 'rey_image', terms } });
+  // Hex swatches: use the attribute name when it's meaningful, else fall back
+  // to "color" (so generic names like "option" still produce color swatches).
+  const key = (attrName && attrName !== 'option') ? attrName : 'color';
+  return JSON.stringify({ [key]: { name: key, type: 'rey_color', terms } });
 }
 
 // ═══ Render results table ═════════════════════════════════════════════════════
@@ -259,8 +475,10 @@ function exportRows() {
   return kept.map(r => {
     if (r.Type !== 'variable') return r;
     const ref = `id:${r.ID}`;
-    const names = kept.filter(x => x.Type === 'variation' && x.Parent === ref).map(x => x['Attribute 1 value(s)']);
-    return Object.assign({}, r, { 'Attribute 1 value(s)': names.join(',') });
+    const variations = kept.filter(x => x.Type === 'variation' && x.Parent === ref);
+    const names = [...new Set(variations.map(x => x['Attribute 1 value(s)']).filter(Boolean))];
+    const names2 = [...new Set(variations.map(x => x['Attribute 2 value(s)']).filter(Boolean))];
+    return Object.assign({}, r, { 'Attribute 1 value(s)': names.join(','), 'Attribute 2 value(s)': names2.join(',') });
   });
 }
 function updateResultCount() {
@@ -284,12 +502,9 @@ function setAllChecks(on) {
 function flashCopied(btn) { btn.classList.add('copied'); const t = btn.textContent; btn.textContent = '✓ Copied'; setTimeout(() => { btn.classList.remove('copied'); btn.textContent = t; }, 1500); }
 
 function renderResults(title) {
-  $('result-title').textContent = title || 'Product';
   const variationIds = variationIdList();
-  const preselect = defaultMode === 'all' ? variationIds : (defaultMode === 'first2' ? variationIds.slice(0, 2) : []);
-  selectedIds = new Set(preselect);
+  selectedIds = new Set(variationIds);
   const showSel = currentType === 'variable' && variationIds.length > 0;
-  $('select-bar').classList.toggle('hidden', !showSel);
   updateResultCount();
 
   const headSel = showSel ? '<th class="sel-col"><input type="checkbox" id="master-check"></th>' : '';
@@ -313,17 +528,6 @@ function renderResults(title) {
         if (cc.startsWith('http')) return `<td class="color-code-cell"><img src="${escHtml(cc)}" onerror="this.style.display='none'"> <input class="color-code-input" value="${escHtml(cc)}" data-rowid="${rowId}"></td>`;
         return `<td class="color-code-cell"><input class="color-code-input" value="${escHtml(cc)}" data-rowid="${rowId}" placeholder="#RRGGBB"></td>`;
       }
-      // Categories: multi-select dropdown for parent/simple rows, empty for variations
-      if (col === 'Categories') {
-        if (isVar) return '<td></td>';
-        const selected = String(row['Categories'] || '').split(',').map(s => s.trim()).filter(Boolean);
-        const opts = flatCategoryOptions();
-        const optionsHtml = opts.map(o => {
-          const sel = selected.includes(o.value) ? ' selected' : '';
-          return `<option value="${escHtml(o.value)}"${sel}>${escHtml(o.label)}</option>`;
-        }).join('');
-        return `<td class="cat-select-cell"><select multiple class="cat-multisel" data-rowid="${escHtml(String(row.ID))}">${optionsHtml}</select></td>`;
-      }
       const val = cellValue(col, row);
       if (col === 'Rey Swatches' && row.Type === 'variable')
         return `<td data-col="Rey Swatches" data-rowid="${escHtml(String(row.ID))}" title="${escHtml(val)}">${escHtml(val.length > 80 ? val.slice(0, 80) + '…' : val)}</td>`;
@@ -331,17 +535,6 @@ function renderResults(title) {
     }).join('');
     return `<tr data-rowid="${escHtml(String(row.ID))}"${isVar ? ' class="var-row"' : ''}>${selCell}${cells}</tr>`;
   }).join('');
-
-  // Categories multi-select change handlers
-  $('tbody').querySelectorAll('.cat-multisel').forEach(sel => {
-    sel.addEventListener('change', () => {
-      const rowId = Number(sel.dataset.rowid);
-      const row = currentRows.find(r => Number(r.ID) === rowId);
-      if (!row) return;
-      const vals = [...sel.selectedOptions].map(o => o.value);
-      row['Categories'] = vals.join(', ');
-    });
-  });
 
   // Color Code input change handlers
   $('tbody').querySelectorAll('.color-code-input').forEach(inp => {
@@ -386,24 +579,6 @@ $('copy-btn').addEventListener('click', () => {
   navigator.clipboard.writeText(tsvOf(COLUMNS, exportRows())).then(() => flashCopied($('copy-btn')));
 });
 $('csv-btn').addEventListener('click', () => downloadCsvFile(csvOf(COLUMNS, exportRows())));
-
-// ═══ Variant selection ════════════════════════════════════════════════════════
-$('sel-all').addEventListener('click', () => setAllChecks(true));
-$('sel-none').addEventListener('click', () => setAllChecks(false));
-function setDefaultMode(mode) {
-  defaultMode = mode;
-  $('default-all').checked = mode === 'all';
-  $('default-first2').checked = mode === 'first2';
-  chrome.storage.local.set({ defaultMode });
-}
-chrome.storage.local.get(['defaultMode', 'defaultSelectAll']).then(r => {
-  const mode = r.defaultMode || (r.defaultSelectAll === false ? 'none' : 'all');
-  defaultMode = mode;
-  $('default-all').checked = mode === 'all';
-  $('default-first2').checked = mode === 'first2';
-});
-$('default-all').addEventListener('change', e => setDefaultMode(e.target.checked ? 'all' : 'none'));
-$('default-first2').addEventListener('change', e => setDefaultMode(e.target.checked ? 'first2' : 'none'));
 
 // ═══ Stores ══════════════════════════════════════════════════════════════════
 async function getStores() { return (await chrome.storage.local.get('stores')).stores || []; }
@@ -477,23 +652,28 @@ async function fillStoreSelect(selEl) {
     : '<span class="none">No stores. Add one in the Stores tab.</span>';
 }
 async function importToStores(csv, selEl, statusFn, skipResize = false) {
-  // If selEl is null, import to all stores (used by bulk single-click import).
   const stores = await getStores();
-  let selected;
-  if (selEl) {
-    const ids = [...selEl.querySelectorAll('input:checked')].map(c => c.value);
-    if (!ids.length) return statusFn('error', 'Select at least one store.');
-    selected = stores.filter(s => ids.includes(s.id));
-  } else {
-    selected = stores.filter(s => s.authKey);
-    if (!selected.length) return statusFn('error', 'No stores with auth keys configured.');
-  }
+  const ids = [...selEl.querySelectorAll('input:checked')].map(c => c.value);
+  if (!ids.length) return statusFn('error', 'Select at least one store.');
+  const selected = stores.filter(s => ids.includes(s.id));
   const report = [];
   for (const s of selected) {
     statusFn('loading', `Importing into ${s.name}...`);
     if (!s.authKey) { report.push(`${s.name}: missing auth key`); continue; }
     const res = await chrome.runtime.sendMessage({ type: 'wcImport', store: s.url, authKey: s.authKey, csv, skipResize });
-    report.push(res.ok ? `✓ ${s.name}` : `✗ ${s.name}: ${res.error}`);
+    if (res.ok) {
+      const d = res.data || {};
+      const created = (d.created_variable || 0) + (d.created_simple || 0);
+      const updated = (d.updated_variable || 0) + (d.updated_simple || 0);
+      const skipped = d.skipped || 0;
+      const parts = [];
+      if (created) parts.push(created + ' created');
+      if (updated) parts.push(updated + ' updated');
+      if (skipped) parts.push(skipped + ' skipped');
+      report.push(`✓ ${s.name}${parts.length ? ' (' + parts.join(', ') + ')' : ''}`);
+    } else {
+      report.push(`✗ ${s.name}: ${res.error}`);
+    }
   }
   statusFn('success', report.join(' | '));
 }
@@ -507,333 +687,83 @@ $('do-import-btn').addEventListener('click', () =>
     (t, m) => { const el = $('import-status'); el.className = `status ${t}`; el.textContent = m; el.classList.remove('hidden'); },
     !$('resize-cb').checked));
 
-// I── Bulk queue (dedicated panel) I───────────────────────────────────────────
-async function getSaved() { return (await chrome.storage.local.get('savedProducts')).savedProducts || []; }
-async function setSaved(s) { await chrome.storage.local.set({ savedProducts: s }); refreshBulkUI(); }
-async function refreshBulkUI() {
-  const saved = await getSaved();
-  const has = saved.length > 0;
-  $('bulk-tab-count').textContent = has ? `(${saved.length})` : '(0)';
-  if (!$('panel-bulk').classList.contains('hidden')) {
-    $('bulk-empty').classList.toggle('hidden', has);
-    $('bulk-content').classList.toggle('hidden', !has);
-    if (has) renderBulkList(saved);
-  }
+// ═══ Brands list ════════════════════════════════════
+let brandsRendered = false;
+function brandNameFromDomain(domain) {
+  if (!domain) return '';
+  return domain.split('.')[0].replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
-refreshBulkUI();
-
-$('save-btn').addEventListener('click', async () => {
-  if (!currentRows.length) return;
-  const saved = await getSaved();
-  saved.push({ id: Date.now().toString(36), title: $('result-title').textContent || 'Product', productType: currentType, rows: exportRows() });
-  await setSaved(saved);
-  flashCopied($('save-btn'));
-});
-
-function renumberRows(rows, startId) {
-  const idMap = {}; let cur = startId;
-  for (const r of rows) if (r.ID !== undefined && r.ID !== '') { idMap[r.ID] = cur; r.ID = cur++; }
-  for (const r of rows) if (r.Parent && String(r.Parent).startsWith('id:')) {
-    const old = parseInt(String(r.Parent).slice(3), 10);
-    if (idMap[old] !== undefined) r.Parent = `id:${idMap[old]}`;
-  }
-  return cur;
-}
-function combineSaved(saved) {
-  const anyVariable = saved.some(i => i.productType !== 'simple');
-  const columns = anyVariable ? VARIABLE_COLUMNS : SIMPLE_COLUMNS;
-  let out = []; let nextId = 1;
-  for (const item of saved) {
-    let rows = JSON.parse(JSON.stringify(item.rows));
-    if (anyVariable && item.productType === 'simple') {
-      rows = rows.map(r => ({
-        ID: nextId++, Parent: '', Type: 'simple', SKU: r.SKU || '', Name: r.Name || '', tags: r.tags || '', 'Product URL': r['Product URL'] || '',
-        Images: r.Images || [], 'Rey Variations extra images': '',
-        Description: r.Description || '', 'Short Description': r['Short Description'] || '',
-        Categories: r.Categories || '', 'Regular Price': r['Regular Price'] || '', 'Sale Price': r['Sale Price'] || '',
-        'Attribute 1 name': '', 'Attribute 1 value(s)': '', 'Attribute 1 visible': '', 'Attribute 1 global': '', 'Color Code': '',
-      }));
-    } else if (anyVariable) {
-      nextId = renumberRows(rows, nextId);
-    }
-    out = out.concat(rows);
-  }
-  return { columns, rows: out };
-}
-
-function renderBulkList(saved) {
-  const list = $('bulk-list');
-  list.innerHTML = saved.map(s => {
-    const products = s.productType === 'simple' ? s.rows.length : s.rows.filter(r => r.Type === 'variable').length;
-    const vars = s.rows.filter(r => r.Type === 'variation').length;
-    const meta = s.productType === 'simple' ? 'simple' : `${vars} variation${vars !== 1 ? 's' : ''}`;
-    return `<li class="store-item" data-id="${s.id}">
-      <div class="store-item-name">${escHtml(s.title)}</div>
-      <div class="store-item-url">${escHtml(s.productType)} · ${meta}</div>
-      <div class="store-item-actions"><button data-act="del" class="del">Remove</button></div>
-    </li>`;
-  }).join('');
-  list.querySelectorAll('[data-act="del"]').forEach(b =>
-    b.addEventListener('click', async (e) => {
-      const id = e.target.closest('.store-item').dataset.id;
-      await setSaved((await getSaved()).filter(x => x.id !== id));
-    }));
-}
-
-$('bulk-clear').addEventListener('click', async () => { await setSaved([]); });
-$('bulk-copy').addEventListener('click', async () => {
-  const saved = await getSaved();
-  if (!saved.length) return;
-  const { columns, rows } = combineSaved(saved);
-  navigator.clipboard.writeText(tsvOf(columns, rows)).then(() => flashCopied($('bulk-copy')));
-});
-$('bulk-csv').addEventListener('click', async () => {
-  const saved = await getSaved();
-  if (!saved.length) return;
-  const { columns, rows } = combineSaved(saved);
-  downloadCsvFile(csvOf(columns, rows));
-});
-
-// Import to website — show store picker if multiple stores, else import directly.
-$('bulk-import-btn').addEventListener('click', async () => {
-  const saved = await getSaved();
-  if (!saved.length) return;
-  const stores = await getStores();
-  const credentialed = stores.filter(s => s.authKey);
-  // If exactly one store with credentials, import directly.
-  if (credentialed.length === 1) {
-    const { columns, rows } = combineSaved(saved);
-    importToStores(csvOf(columns, rows), null,
-      (t, m) => { const el = $('bulk-import-status'); el.className = `status ${t}`; el.textContent = m; el.classList.remove('hidden'); },
-      !$('bulk-resize-cb').checked);
-    $('bulk-import-status').classList.remove('hidden');
-    return;
-  }
-  // Show store picker.
-  const box = $('bulk-import-box'); box.classList.toggle('hidden');
-  if (!box.classList.contains('hidden')) await fillStoreSelect($('bulk-store-select'));
-});
-$('bulk-do-import').addEventListener('click', async () => {
-  const saved = await getSaved();
-  if (!saved.length) return;
-  const { columns, rows } = combineSaved(saved);
-  importToStores(csvOf(columns, rows), $('bulk-store-select'),
-    (t, m) => { const el = $('bulk-import-status'); el.className = `status ${t}`; el.textContent = m; el.classList.remove('hidden'); },
-    !$('bulk-resize-cb').checked);
-});
-
-// ═══ Brands list (with discover buttons) ════════════════════════════════════
 async function renderBrands() {
-  const brands = (self.ProductScraper && self.ProductScraper.brands) || [];
-  const ready = brands.filter(b => b.ready);
+  if (brandsRendered) return;
+  const brands = (self.BrandCatalog && self.BrandCatalog.brands) || [];
+
+  // Scrapers from Supabase (custom + predefined), grouped by domain. Each domain
+  // can hold both a `simple` and a `variable` scraper; show one row with a tag
+  // per type that exists.
+  let scrapers = [];
+  try { scrapers = self.Supabase ? await self.Supabase.listScrapers() : []; } catch (e) { scrapers = []; }
+  const byDomain = {};
+  for (const s of scrapers) {
+    if (!s || !s.domain) continue;
+    (byDomain[s.domain] = byDomain[s.domain] || []).push(s);
+  }
+  const custom = Object.entries(byDomain).map(([domain, rows]) => {
+    const types = rows.map(r => r.type).filter(Boolean);
+    const first = rows[0] || {};
+    const predefined = rows.every(r => r.is_predefined);
+    return {
+      name: (first.brand && String(first.brand) !== '0' && String(first.brand) !== '')
+        ? first.brand : brandNameFromDomain(domain),
+      types,
+      example: first.example || '',
+      domain,
+      custom: true,
+      predefined,
+    };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+
+  // Bundled catalog entries that aren't already in the Supabase registry.
+  const customDomains = new Set(custom.map(c => c.domain));
+  const ready = brands.filter(b => b.ready && !customDomains.has(b.domain));
   const soon = brands.filter(b => !b.ready);
+
   const li = b => {
-    const discoverBtn = b.discover
-      ? `<button class="brand-discover-btn" data-brand-key="${escHtml(b.key)}" data-brand-name="${escHtml(b.name)}">Discover</button>`
-      : '';
     const exampleBtn = b.example
       ? `<a class="brand-example" href="${escHtml(b.example)}" target="_blank" rel="noopener">Example</a>`
       : '';
-    const actions = [discoverBtn, exampleBtn].filter(Boolean).join('');
+    const tags = (b.types || []).map(t => `<span class="type-tag type-${t}">${escHtml(t)}</span>`).join('');
+    const delBtn = (b.custom && !b.predefined)
+      ? `<button class="brand-del" data-domain="${escHtml(b.domain)}" title="Delete this scraper">✕</button>`
+      : '';
     return `<li>
-      <span class="brand-name">${escHtml(b.name)}</span>
-      <div class="brand-actions">${actions}</div>
+      <div class="brand-info">
+        <span class="brand-name">${escHtml(b.name)}</span>
+        ${tags}
+      </div>
+      <div class="brand-actions">${exampleBtn}${delBtn}</div>
     </li>`;
   };
-  let html = ready.map(li).join('');
+
+  let html = custom.map(li).join('') + ready.map(li).join('');
   if (soon.length) html += `<li class="brands-soon">Coming soon: ${soon.map(b => escHtml(b.name)).join(', ')}</li>`;
   $('brands-list').innerHTML = html;
-  // Wire discover buttons
-  document.querySelectorAll('.brand-discover-btn').forEach(btn =>
-    btn.addEventListener('click', () => startDiscover(btn.dataset.brandKey, btn.dataset.brandName)));
-}
-renderBrands();
 
-let discoverBrandName = '';
+  // Delete handler for user-created (non-predefined) scrapers.
+  $('brands-list').querySelectorAll('.brand-del').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const domain = btn.dataset.domain;
+      try { if (self.Supabase) await self.Supabase.deleteScraperByDomain(domain); } catch (e) {}
+      brandsRendered = false;
+      renderBrands();
+    });
+  });
 
-// ═══ Discover (inline panel) ═══════════════════════════════════════════════════
-
-$('discover-close-btn').addEventListener('click', () => {
-  $('discover-panel').classList.add('hidden');
-});
-
-async function startDiscover(site, brandName) {
-  discoverBrandName = brandName;
-  // Reset panel
-  $('discover-brand-name').textContent = brandName;
-  $('discover-results').classList.add('hidden');
-  $('discover-status').classList.add('hidden');
-  $('discover-progress').classList.remove('hidden');
-  $('discover-progress-fill').style.width = '0%';
-  $('discover-progress-text').textContent = 'Fetching sitemap…';
-  $('discover-panel').classList.remove('hidden');
-  $('discover-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
-  document.querySelectorAll('.brand-discover-btn').forEach(b => b.disabled = true);
-  discoverCategories = [];
-  try {
-    const res = await chrome.runtime.sendMessage({ type: 'bulkDiscover', site });
-    if (!res || !res.ok) throw new Error((res && res.error) || 'Discovery failed');
-    discoverCategories = res.categories || [];
-    renderDiscoverResults(res);
-    discoverPanelStatus('success', `Found ${res.totalProducts} products across ${res.totalCategories} categories.`);
-  } catch (e) {
-    discoverPanelStatus('error', e.message);
-  } finally {
-    $('discover-progress').classList.add('hidden');
-    document.querySelectorAll('.brand-discover-btn').forEach(b => b.disabled = false);
-  }
+  brandsRendered = true;
 }
 
-function discoverPanelStatus(type, msg) {
-  const el = $('discover-status');
-  el.className = `status ${type}`; el.textContent = msg; el.classList.remove('hidden');
-}
-
-function renderDiscoverResults(res) {
-  const totalProds = res.totalProducts || discoverCategories.reduce((s, c) => s + (c.products || []).length, 0);
-  $('discover-result-title').textContent = res.totalCategories + ' categories';
-  $('discover-result-count').textContent = totalProds + ' products';
-  $('discover-results').classList.remove('hidden');
-  $('discover-status').classList.add('hidden');
-
-  $('discover-tree').innerHTML = discoverCategories.map((cat, i) => {
-    const prods = cat.products || [];
-    const errorNote = cat.error ? `<span class="discover-error">⚠ ${escHtml(cat.error)}</span>` : '';
-    let productRows = '';
-    if (prods.length) {
-      productRows = prods.map((p, j) => {
-        const displayUrl = p.url.replace(/https?:\/\/pastelarabia\.com/, '');
-        return `
-        <tr>
-          <td class="discover-col-id">${j + 1}</td>
-          <td>${p.name ? escHtml(p.name) : '<span class="muted">(unknown)</span>'}</td>
-          <td><a href="${escHtml(p.url)}" target="_blank" rel="noopener" class="discover-url">${escHtml(displayUrl)}</a></td>
-          <td class="discover-col-add"><button class="discover-add-btn" data-url="${escHtml(p.url)}">+ Bulk</button></td>
-        </tr>`;
-      }).join('');
-    }
-    return `<details class="discover-cat-details"${i === 0 ? ' open' : ''}>
-      <summary class="discover-cat-summary">
-        <span class="discover-cat-name">${escHtml(cat.name)}</span>
-        <span class="discover-cat-url"><a href="${escHtml(cat.url)}" target="_blank" rel="noopener">${escHtml(cat.url.replace(/https?:\/\/[^/]+/, ''))}</a></span>
-        <span class="discover-cat-count">${prods.length}</span>
-        <button class="discover-scrape-cat-btn" data-cat-url="${escHtml(cat.url)}" data-cat-name="${escHtml(cat.name)}">Scrape</button>
-        ${errorNote}
-      </summary>
-      ${prods.length ? `<table class="discover-prod-table"><thead><tr><th class="discover-col-id">#</th><th>Product</th><th>URL</th><th class="discover-col-add"></th></tr></thead><tbody>${productRows}</tbody></table>` : '<p class="muted" style="padding:0 12px 8px">No products found on this category page.</p>'}
-    </details>`;
-  }).join('');
-
-  // Wire scrape-category buttons
-  $('discover-tree').querySelectorAll('.discover-scrape-cat-btn').forEach(btn =>
-    btn.addEventListener('click', async (e) => {
-      const catUrl = e.target.dataset.catUrl;
-      const catName = e.target.dataset.catName;
-      // Disable all scrape buttons while scraping
-      const allBtns = $('discover-tree').querySelectorAll('.discover-scrape-cat-btn');
-      allBtns.forEach(b => b.disabled = true);
-      e.target.textContent = 'Scraping…';
-      try {
-        const res = await chrome.runtime.sendMessage({ type: 'scrapeCategory', collectionUrl: catUrl });
-        if (!res || !res.ok) throw new Error((res && res.error) || 'Category scrape failed');
-        const rows = res.rows || [];
-        // Tag all rows with the brand name, set categories and product URLs as fallback
-        rows.forEach(r => {
-          r.tags = discoverBrandName;
-          r['Product URL'] = r['Product URL'] || catUrl;
-          r.Categories = r.Categories || catName;
-        });
-        // If there were errors, show a note
-        if (res.errors && res.errors.length) {
-          status('warn', `Scraped ${rows.length} rows, ${res.errors.length} products had errors.`);
-        }
-        // Populate the main table and switch to Products tab
-        currentRows = rows;
-        if (currentRows.length > 0) {
-          setType(currentRows[0].hasOwnProperty('Type') ? 'variable' : 'simple');
-        }
-        renderResults(catName || 'Pastel Category');
-        $('status').classList.add('hidden');
-        // Switch to Products tab
-        document.querySelectorAll('.sp-tab').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.sp-panel').forEach(p => p.classList.add('hidden'));
-        $('tab-products').classList.add('active');
-        $('panel-products').classList.remove('hidden');
-        // Scroll to table
-        $('data-table').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        // Close discover panel
-        $('discover-panel').classList.add('hidden');
-        status('success', `Scraped ${rows.length} rows from "${catName}" (${res.totalProducts || '?'} products).`);
-      } catch (err) {
-        status('error', err.message);
-      } finally {
-        e.target.textContent = 'Scrape';
-        allBtns.forEach(b => b.disabled = false);
-      }
-    }));
-
-  // Wire "Add to bulk" buttons
-  $('discover-tree').querySelectorAll('.discover-add-btn').forEach(btn =>
-    btn.addEventListener('click', async (e) => {
-      const url = e.target.dataset.url;
-      // Run a quick variable scrape for this product URL
-      try {
-        e.target.textContent = '…';
-        e.target.disabled = true;
-        const res = await chrome.runtime.sendMessage({ type: 'scrape', mode: 'url', productType: 'variable', url });
-        if (!res || !res.ok) throw new Error((res && res.error) || 'Scrape failed');
-        const brand = (self.ProductScraper && self.ProductScraper.brands || [])
-          .find(b => url.includes(b.domain));
-        const rows = res.rows || [];
-        rows.forEach(r => { r.tags = brand ? brand.name : ''; r['Product URL'] = url; });
-        const saved = await getSaved();
-        saved.push({ id: Date.now().toString(36), title: res.title || url, productType: 'variable', rows });
-        await setSaved(saved);
-        e.target.textContent = '✓';
-        e.target.classList.add('copied');
-        setTimeout(() => { e.target.textContent = '+ Bulk'; e.target.classList.remove('copied'); e.target.disabled = false; }, 2000);
-      } catch (err) {
-        e.target.textContent = '✗';
-        e.target.style.color = 'var(--err)';
-        setTimeout(() => { e.target.textContent = '+ Bulk'; e.target.style.color = ''; e.target.disabled = false; }, 2000);
-      }
-    }));
-
-  $('discover-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-$('discover-expand-btn').addEventListener('click', () => {
-  $('discover-tree').querySelectorAll('details').forEach(d => d.open = true);
+// ═══ Keep the hero button in sync with the active tab ════════════════════════
+chrome.tabs.onActivated.addListener(() => { refreshScraperStatus(); });
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status === 'complete' || info.url) refreshScraperStatus();
 });
-$('discover-collapse-btn').addEventListener('click', () => {
-  $('discover-tree').querySelectorAll('details').forEach(d => d.open = false);
-});
-$('discover-csv-btn').addEventListener('click', () => {
-  const rows = [];
-  for (const cat of discoverCategories) {
-    for (const p of (cat.products || [])) {
-      rows.push({ category: cat.name, categoryUrl: cat.url, product: p.name, productUrl: p.url });
-    }
-  }
-  if (!rows.length) return;
-  const esc = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  const csv = ['Category,Category URL,Product Name,Product URL', ...rows.map(r =>
-    [esc(r.category), esc(r.categoryUrl), esc(r.product), esc(r.productUrl)].join(','))].join('\n');
-  downloadCsvFile(csv, 'discover-products.csv');
-});
-
-// Progress messages from background worker
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.type === 'bulkDiscoverProgress') {
-    if (msg.phase === 'scanning') {
-      const pct = Math.round((msg.current / msg.total) * 100);
-      $('discover-progress-fill').style.width = pct + '%';
-      const catName = (msg.catUrl || '').replace(/.*\/category\//, '').replace(/.*\/collections\//, '').replace(/\/+$/, '').replace(/_\d+/, '');
-      $('discover-progress-text').textContent = `Scanning ${msg.current}/${msg.total}: ${catName} (${msg.foundSoFar} products so far)`;
-    } else if (msg.phase === 'done') {
-      $('discover-progress-fill').style.width = '100%';
-      $('discover-progress-text').textContent = `Done — ${msg.totalProducts} products across ${msg.totalCats} categories.`;
-    }
-  }
-});
+refreshScraperStatus();

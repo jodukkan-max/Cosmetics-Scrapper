@@ -1,0 +1,41 @@
+/* Desktop layout — embedded browser on the left, scraper panel on the right.
+ * Loaded after sidepanel.css; extends the single-column panel styles into a
+ * two-pane app shell. */
+
+html, body { height: 100%; overflow: hidden; }
+
+.app { display: flex; height: 100vh; width: 100vw; }
+
+/* ── Left: browser ─────────────────────────────────────────── */
+.browser-pane { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+
+.urlbar {
+  display: flex; gap: 8px; padding: 8px 10px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.urlbar input {
+  flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius); padding: 8px 10px; font-family: inherit; font-size: 13px;
+}
+.urlbar input:focus { outline: none; border-color: var(--accent); }
+.urlbar button {
+  background: var(--accent); color: #fff; border: none; border-radius: var(--radius);
+  padding: 8px 18px; cursor: pointer; font-weight: 500; font-size: 13px; font-family: inherit;
+}
+.urlbar button:hover { background: var(--accent-hover); }
+
+#browser { flex: 1 1 auto; border: none; display: flex; width: 100%; }
+
+/* ── Right: scraper panel ──────────────────────────────────── */
+.panel-pane {
+  flex: 0 0 440px; width: 440px; max-width: 44vw;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column;
+}
+.panel-pane .sp-header { flex: 0 0 auto; }
+.panel-pane .sp-panel { flex: 1 1 auto; }
+
+/* The hero's vertical centering is tuned for a full-height side panel. */
+#panel-products { min-height: 0; }

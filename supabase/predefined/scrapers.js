@@ -83,8 +83,12 @@
   }
 
   // ── Variation row builders (shared shapes) ──────────────────────────────────
-  function variableRows(title, parentImages, description, shortDesc, categories, optionName, variants) {
-    // variants: [{ name, sku, regularPrice, salePrice, images:[], extras:[], colorCode }]
+  function variableRows(title, parentImages, description, shortDesc, categories, optionName, variants, optionName2) {
+    // variants: [{ name, name2, sku, regularPrice, salePrice, images:[], extras:[], colorCode }]
+    // optionName2 / name2 are the SECOND attribute of any multi-attribute product (e.g. "Size" when "Color" is first, or "Material" when "Size" is first). Omit or '' when single-attribute.
+    optionName2 = optionName2 || '';
+    const attr1 = [...new Set((variants || []).map(v => v.name).filter(Boolean))].join(',');
+    const attr2 = [...new Set((variants || []).map(v => v.name2).filter(Boolean))].join(',');
     const rows = [];
     let rowId = 1;
     rows.push({
@@ -92,8 +96,11 @@
       Images: (parentImages || []).slice(0, 4), 'Rey Variations extra images': '',
       Description: description || '', 'Short Description': shortDesc || '', Categories: categories || '',
       'Regular Price': '', 'Sale Price': '',
-      'Attribute 1 name': optionName, 'Attribute 1 value(s)': variants.map(v => v.name).join(','),
-      'Attribute 1 visible': '1', 'Attribute 1 global': '1', 'Color Code': '',
+      'Attribute 1 name': optionName, 'Attribute 1 value(s)': attr1,
+      'Attribute 1 visible': '1', 'Attribute 1 global': '1',
+      'Attribute 2 name': optionName2, 'Attribute 2 value(s)': attr2,
+      'Attribute 2 visible': optionName2 ? '1' : '', 'Attribute 2 global': optionName2 ? '1' : '',
+      'Color Code': '',
     });
     const parentId = rowId - 1;
     for (const v of variants) {
@@ -102,9 +109,12 @@
         Images: v.images && v.images.length ? [v.images[0]] : [],
         'Rey Variations extra images': (v.extras && v.extras.length) ? v.extras : [],
         Description: '', 'Short Description': '', Categories: '',
-        'Regular Price': v.regularPrice || '15', 'Sale Price': v.salePrice || '',
-        'Attribute 1 name': optionName, 'Attribute 1 value(s)': v.name,
-        'Attribute 1 visible': '', 'Attribute 1 global': '1', 'Color Code': v.colorCode || '',
+        'Regular Price': v.regularPrice || '', 'Sale Price': v.salePrice || '',
+        'Attribute 1 name': optionName, 'Attribute 1 value(s)': v.name || '',
+        'Attribute 1 visible': '', 'Attribute 1 global': '1',
+        'Attribute 2 name': optionName2, 'Attribute 2 value(s)': v.name2 || '',
+        'Attribute 2 visible': '', 'Attribute 2 global': optionName2 ? '1' : '',
+        'Color Code': v.colorCode || '',
       });
     }
     return rows;
@@ -112,7 +122,7 @@
   function simpleRow(o) {
     return [{
       SKU: o.sku || '', Name: o.name || '', Description: o.description || '', 'Short Description': o.shortDesc || '',
-      'Regular Price': o.price || '15', Categories: o.categories || '', Images: o.images || [], 'Sale Price': '',
+      'Regular Price': o.regularPrice || o.price || '', Categories: o.categories || '', Images: o.images || [], 'Sale Price': o.salePrice || '',
     }];
   }
 
@@ -2282,7 +2292,7 @@
     let description = (product && product.description) ? decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()) : '';
 
     const sku = '';
-    const price = '15';
+    const price = '';
     const category = (product && product.category) || '';
     let images = [];
     const mediaMatch = html.match(/<media-gallery[\s\S]*?<\/media-gallery>/i);
@@ -2311,7 +2321,7 @@
     const title = (product && product.name) || '';
     const description = (product && product.description) ? decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()) : '';
     const sku = '';
-    const price = '15';
+    const price = '';
     const category = (product && product.category) || '';
     let images = [];
     const mediaMatch = html.match(/<media-gallery[\s\S]*?<\/media-gallery>/i);
@@ -2354,7 +2364,7 @@
       return dm ? decodeEntities(dm[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()) : '';
     })();
     const sku = '';
-    const price = '15';
+    const price = '';
     const categories = (prodData && prodData.analytics && prodData.analytics.parent_category) || '';
     // Images from Swiper gallery (source srcset)
     let images = [...new Set(
@@ -2573,464 +2583,6 @@
       if (og) images = [og];
     }
     return { rows: simpleRow({ sku, name: title, description, regularPrice: price, images }), title };
-  }
-
-  // ── Bulk discovery: get all products + categories via sitemap ────────────
-  // ── e.l.f. Cosmetics (Shopify, sitemap-based, per‑page JSON‑LD breadcrumbs) ──
-  async function discoverElf(ctx) {
-    const { fetchText, onProgress } = ctx;
-
-    // 1) Fetch sitemap index → collect product sitemap URLs
-    const sitemapXml = await fetchText('https://www.elfcosmetics.com/sitemap.xml');
-    const productSmUrls = [...sitemapXml.matchAll(/<loc>(https:\/\/www\.elfcosmetics\.com\/sitemap\/products\/\d+\.xml)<\/loc>/g)].map(m => m[1]);
-    if (!productSmUrls.length) throw new Error('No product sitemaps found for e.l.f.');
-
-    // 2) Fetch all product sitemaps in parallel → collect every product URL
-    const productUrls = [];
-    for (const smUrl of productSmUrls) {
-      const xml = await fetchText(smUrl);
-      const urls = [...xml.matchAll(/<loc>(https:\/\/www\.elfcosmetics\.com\/products\/[^<]+)<\/loc>/g)].map(m => m[1]);
-      productUrls.push(...urls);
-    }
-    if (!productUrls.length) throw new Error('No product URLs found in e.l.f. sitemaps.');
-
-    // 3) Group by category: fetch each product page, extract BreadcrumbList from JSON‑LD
-    const catMap = new Map(); // key = breadcrumb string (e.g. "Eyes > Eyeliner") → { name, url, products }
-    const total = productUrls.length;
-
-    onProgress && onProgress({ phase: 'scanning', current: 0, total, foundSoFar: 0 });
-
-    const BATCH = 5;
-    for (let i = 0; i < productUrls.length; i += BATCH) {
-      const batch = productUrls.slice(i, i + BATCH);
-      const results = await Promise.allSettled(
-        batch.map(async (url) => {
-          try {
-            const html = await fetchText(url);
-            // Extract all JSON‑LD blocks
-            const ldBlocks = [];
-            const ldRe = /<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi;
-            let ldM;
-            while ((ldM = ldRe.exec(html))) {
-              try { ldBlocks.push(JSON.parse(ldM[1])); } catch (e) { /* skip */ }
-            }
-
-            let name = '';
-            const breadcrumbs = [];
-            for (const block of ldBlocks) {
-              const items = Array.isArray(block) ? block : [block];
-              for (const item of items) {
-                if (item['@type'] === 'Product' && !name) name = item.name || '';
-                if (item['@type'] === 'BreadcrumbList') {
-                  const elems = item.itemListElement || [];
-                  for (const e of elems) {
-                    if (e.name && e.name !== 'Home') breadcrumbs.push(e.name);
-                  }
-                  // Last breadcrumb is the product name — remove it
-                  if (breadcrumbs.length) breadcrumbs.pop();
-                }
-              }
-            }
-            // Fallback name from <title>
-            if (!name) {
-              const titleM = html.match(/<title>([^<]*)<\/title>/);
-              if (titleM) name = titleM[1].replace(/\s*[–—|-]\s*e\.l\.f\..*/i, '').trim();
-            }
-            const category = breadcrumbs.length ? breadcrumbs.join(' > ') : 'All Products';
-            return { name: name || 'Unknown', url, category };
-          } catch (e) {
-            // Derive name from URL slug
-            const slug = url.replace(/.*\/products\//, '').replace(/\/$/, '');
-            const name = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-            return { name, url, category: 'Uncategorized' };
-          }
-        })
-      );
-
-      for (const r of results) {
-        if (r.status === 'fulfilled' && r.value) {
-          const { name, url, category } = r.value;
-          if (!catMap.has(category)) {
-            // Build a category URL from the first breadcrumb item
-            const parts = category.split(' > ');
-            const firstPart = parts[0].toLowerCase().replace(/\s+/g, '-');
-            const catUrl = 'https://www.elfcosmetics.com/collections/' + firstPart;
-            catMap.set(category, { name: category, url: catUrl, products: [] });
-          }
-          catMap.get(category).products.push({ name, url });
-        }
-      }
-
-      const foundSoFar = [...catMap.values()].reduce((s, c) => s + c.products.length, 0);
-      onProgress && onProgress({ phase: 'scanning', current: Math.min(i + BATCH, total), total, foundSoFar });
-    }
-
-    const categories = [...catMap.values()]
-      .sort((a, b) => a.name.localeCompare(b.name));
-    const totalProducts = categories.reduce((s, c) => s + c.products.length, 0);
-    onProgress && onProgress({ phase: 'done', totalCats: categories.length, totalProducts });
-    return { categories, totalProducts, totalCategories: categories.length };
-  }
-
-  // ── NYX Cosmetics (Salesforce Commerce Cloud — blocks server-side access) ──
-  // NYX returns 403 for all server-side requests (sitemaps, category pages).
-  // Discovery requires a browser rendering session — currently unsupported.
-  async function discoverNyx(ctx) {
-    // Try the sitemap first — if by some chance it works, proceed.
-    try {
-      const xmlText = await ctx.fetchText('https://www.nyxcosmetics.com/sitemap.xml');
-      if (xmlText && xmlText.includes('<loc>')) {
-        // Sitemap accessible — extract URLs and group
-        const locs = [...xmlText.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1]);
-        const productUrls = locs.filter(u => u.includes('/lip/') || u.includes('/face/') || u.includes('/eyes/') || u.includes('/brows/'));
-        const catMap = new Map();
-        for (const url of productUrls) {
-          // Derive category from URL path
-          const path = new URL(url).pathname.replace(/\/+$/, '');
-          const parts = path.split('/').filter(Boolean);
-          const category = parts.length >= 2 ? parts[parts.length - 2].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'All';
-          const name = (parts[parts.length - 1] || '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-          if (!catMap.has(category)) catMap.set(category, { name: category, url: 'https://www.nyxcosmetics.com/' + parts[0] + '/', products: [] });
-          catMap.get(category).products.push({ name, url });
-        }
-        const categories = [...catMap.values()].sort((a, b) => a.name.localeCompare(b.name));
-        const totalProducts = categories.reduce((s, c) => s + c.products.length, 0);
-        ctx.onProgress && ctx.onProgress({ phase: 'done', totalCats: categories.length, totalProducts });
-        return { categories, totalProducts, totalCategories: categories.length };
-      }
-    } catch (e) {
-      // Sitemap blocked — this is expected
-    }
-
-    // NYX blocks server-side access completely.
-    // Provide categories the user can use for manual scraping.
-    const categories = [
-      { name: 'Lips', url: 'https://www.nyxcosmetics.com/lip/', products: [] },
-      { name: 'Face', url: 'https://www.nyxcosmetics.com/face/', products: [] },
-      { name: 'Eyes', url: 'https://www.nyxcosmetics.com/eyes/', products: [] },
-      { name: 'Brows', url: 'https://www.nyxcosmetics.com/brows/', products: [] },
-      { name: 'Brushes & Tools', url: 'https://www.nyxcosmetics.com/brushes-and-tools/', products: [] },
-    ];
-    const summary = 'NYX blocks automated access (Server 403). For product discovery, browse to any NYX product page, then use "Scrape This Page" to save individual products to the Bulk queue.';
-    ctx.onProgress && ctx.onProgress({ phase: 'done', totalCats: 0, totalProducts: 0, summary });
-    return { categories, totalProducts: 0, totalCategories: categories.length, summary, blocked: true };
-  }
-
-  async function discoverSeventeen(ctx) {
-    const { fetchText, onProgress } = ctx;
-    const sitemapUrl = 'https://seventeencosmetics.com/sitemap.xml';
-    const xmlText = await fetchText(sitemapUrl);
-    const locs = [...xmlText.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1]);
-
-    // Split into categories and products
-    const categoryUrls = [];
-    const productUrls = [];
-    for (const u of locs) {
-      if (u.includes('/catalogue/category/')) categoryUrls.push(u);
-      else if (u.includes('/catalogue/')) productUrls.push(u);
-    }
-
-    // Normalize to /en/ (site supports both /el/ and /en/)
-    const toEn = u => u.replace(/\/el\//, '/en/');
-    const enCategories = categoryUrls.map(toEn);
-    const enProducts = productUrls.map(toEn);
-
-    // Find leaf categories (deepest nesting). Strip _id suffixes from each
-    // path segment so /make-up_1/ is recognized as the parent of /make-up/face_5/.
-    function normalizedPath(url) {
-      return url.replace(/\/+$/, '').split('/').map(s => s.replace(/_\d+$/, '')).join('/');
-    }
-    const leafCategories = enCategories.filter(cat =>
-      !enCategories.some(other => other !== cat && normalizedPath(other).startsWith(normalizedPath(cat) + '/'))
-    );
-
-    // Category name from URL: /en/catalogue/category/make-up/eyes_7/ → Make-Up > Eyes
-    function catName(url) {
-      const segments = url.replace(/\/+$/, '').split('/catalogue/category/')[1].split('/');
-      return segments.map(s => s.replace(/_\d+$/, '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())).join(' > ');
-    }
-
-    const categories = [];
-    const totalCats = leafCategories.length;
-    let processedCats = 0;
-    let totalProductsFound = 0;
-
-    // Fetch each category page, extract product names + URLs
-    for (const catUrl of leafCategories) {
-      onProgress && onProgress({ phase: 'scanning', current: processedCats + 1, total: totalCats, catUrl, foundSoFar: totalProductsFound });
-      try {
-        const html = await fetchText(catUrl);
-        // Extract product names + URLs from product-card title elements
-        const seen = new Set();
-        const products = [];
-        const titleRe = /product-card__details__title[\s\S]*?<a[\s\S]*?href="([^"]+)"[\s\S]*?>([\s\S]*?)<\/a>/g;
-        let m;
-        while ((m = titleRe.exec(html))) {
-          const href = m[1].replace(/\?vid=\d+.*/, '').replace(/#.*/, '');
-          const name = m[2].replace(/\s+/g, ' ').trim();
-          const fullUrl = href.startsWith('http') ? href : 'https://seventeencosmetics.com' + href;
-          if (name && !seen.has(fullUrl)) {
-            seen.add(fullUrl);
-            products.push({ name, url: fullUrl });
-          }
-        }
-
-        // Fallback: if no product cards found, extract all catalogue hrefs
-        if (!products.length) {
-          const links = new Set();
-          for (const l of html.matchAll(/href="(\/en\/catalogue\/[^"]+)"/g)) {
-            const u = (l[1] || '').replace(/\?vid=\d+.*/, '').replace(/#.*/, '');
-            if (!u.includes('/category/') && !u.includes('/ranges/'))
-              links.add(u.startsWith('http') ? u : 'https://seventeencosmetics.com' + u);
-          }
-          for (const u of links) products.push({ name: '', url: u });
-        }
-
-        totalProductsFound += products.length;
-        categories.push({ name: catName(catUrl), url: catUrl, products });
-      } catch (e) {
-        categories.push({ name: catName(catUrl), url: catUrl, products: [], error: e.message });
-      }
-      processedCats++;
-    }
-
-    onProgress && onProgress({ phase: 'done', totalCats, totalProducts: totalProductsFound });
-    return { categories, totalProducts: totalProductsFound, totalCategories: categories.length };
-  }
-
-  async function discoverMaybelline(ctx) {
-    const { fetchText, onProgress } = ctx;
-    const xmlText = await fetchText('https://www.maybelline.com/sitemap.xml');
-    const locs = [...xmlText.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1]);
-
-    onProgress && onProgress({ phase: 'scanning', current: 0, total: 1, catUrl: '', foundSoFar: 0 });
-
-    // Category roots for Maybelline
-    const catRoots = ['eye-makeup','face-makeup','lip-makeup','nail-makeup','accessories'];
-    // Human-readable category names
-    const catNames = {
-      'eye-makeup': 'Eye Makeup', 'face-makeup': 'Face Makeup',
-      'lip-makeup': 'Lip Makeup', 'nail-makeup': 'Nail Makeup',
-      'accessories': 'Accessories'
-    };
-    const subcatNames = {
-      'eyebrow-makeup': 'Eyebrow', 'eyeliner': 'Eyeliner', 'eyeshadow': 'Eyeshadow',
-      'mascara': 'Mascara', 'foundation-makeup': 'Foundation', 'concealer': 'Concealer',
-      'powder': 'Powder', 'blush-and-bronzer': 'Blush & Bronzer', 'contouring': 'Contouring',
-      'primer': 'Primer', 'lipstick': 'Lipstick', 'lip-gloss': 'Lip Gloss',
-      'lip-balm': 'Lip Balm', 'lip-liner': 'Lip Liner', 'nail-color': 'Nail Color',
-      'brushes': 'Brushes', 'makeup-tools': 'Tools', 'removers': 'Removers'
-    };
-
-    // Group products by parent category
-    const catMap = new Map(); // key: parentSubcat -> { name, url, products }
-
-    for (const url of locs) {
-      const path = (new URL(url)).pathname.replace(/\/+$/,'').replace(/^\//,'');
-      const parts = path.split('/');
-      const rootIdx = parts.findIndex(p => catRoots.includes(p));
-      if (rootIdx < 0) continue;
-      const depth = parts.length - rootIdx;
-      if (depth < 3) continue;
-
-      const last = parts[parts.length - 1];
-      const wordCount = last.split('-').length;
-      // Product heuristic: >2 words OR (>15 chars AND >=2 words)
-      if (!(wordCount > 2 || (last.length > 15 && wordCount >= 2))) continue;
-
-      const root = parts[rootIdx];
-      const subcat = parts[rootIdx + 1] || root;
-      const parentKey = root + '/' + subcat;
-      const parentUrl = 'https://www.maybelline.com/' + root + '/' + subcat + '/';
-
-      if (!catMap.has(parentKey)) {
-        const rootName = catNames[root] || root.replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
-        const subName = subcatNames[subcat] || subcat.replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
-        catMap.set(parentKey, { name: rootName + ' > ' + subName, url: parentUrl, products: [] });
-      }
-
-      // Derive product name from slug
-      const name = last.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-
-      catMap.get(parentKey).products.push({ name, url });
-    }
-
-    const categories = [...catMap.values()].sort((a, b) => a.name.localeCompare(b.name));
-    const totalProducts = categories.reduce((s, c) => s + c.products.length, 0);
-
-    onProgress && onProgress({ phase: 'done', totalCats: categories.length, totalProducts });
-    return { categories, totalProducts, totalCategories: categories.length };
-  }
-
-  // ── Pastel Discovery (Shopify — collections API → sitemap-style) ──────────
-  async function discoverPastel(ctx) {
-    const { fetchText, onProgress } = ctx;
-    const base = 'https://pastelarabia.com';
-
-    // Fetch all collections (acts as category sitemap)
-    const collectionsJson = await fetchText(`${base}/collections.json?limit=250`);
-    let allCollections;
-    try { allCollections = JSON.parse(collectionsJson).collections || []; } catch (e) {
-      throw new Error('Failed to parse Pastel collections JSON');
-    }
-
-    // Filter: skip "all" and frontpage collections
-    const collections = allCollections.filter(c =>
-      c.handle !== 'all' && c.handle !== 'frontpage');
-
-    if (!collections.length) throw new Error('No Pastel collections found.');
-
-    const total = collections.length;
-    const categories = [];
-    let totalProductsFound = 0;
-
-    // For each collection (category), fetch its products
-    for (let i = 0; i < collections.length; i++) {
-      const col = collections[i];
-      const catUrl = `${base}/collections/${col.handle}`;
-      onProgress && onProgress({ phase: 'scanning', current: i + 1, total, catUrl, foundSoFar: totalProductsFound });
-
-      try {
-        // Fetch first page of products from this collection
-        const prodJson = await fetchText(`${base}/collections/${col.handle}/products.json?limit=250`);
-        const prods = JSON.parse(prodJson).products || [];
-        const products = prods.map(p => ({
-          name: p.title || p.handle,
-          url: `${base}/products/${p.handle}`
-        }));
-
-        totalProductsFound += products.length;
-        categories.push({ name: col.title || col.handle, url: catUrl, products });
-      } catch (e) {
-        categories.push({ name: col.title || col.handle, url: catUrl, products: [], error: e.message });
-      }
-    }
-
-    onProgress && onProgress({ phase: 'done', totalCats: categories.length, totalProducts: totalProductsFound });
-    return { categories, totalProducts: totalProductsFound, totalCategories: categories.length };
-  }
-
-  // ── Pastel Category Scrape (scrape all products from a collection) ──────
-  async function scrapePastelCollection(collectionUrl) {
-    const u = new URL(collectionUrl);
-    const base = u.origin;
-    const handle = u.pathname.replace(/.*\/collections\//, '').replace(/\/$/, '');
-
-    // Fetch all pages of products from this collection
-    const allProducts = [];
-    let page = 1;
-    while (true) {
-      const url = `${base}/collections/${handle}/products.json?limit=250&page=${page}`;
-      let prods;
-      try {
-        const resp = await fetch(url);
-        const data = await resp.json();
-        prods = data.products || [];
-      } catch (e) { break; }
-      if (!prods.length) break;
-      allProducts.push(...prods);
-      if (prods.length < 250) break;
-      page++;
-    }
-
-    if (!allProducts.length) return { ok: true, rows: [], totalProducts: 0, errors: [] };
-
-    // Scrape each product in parallel batches
-    const allRows = [];
-    const errors = [];
-    const BATCH = 5;
-
-    for (let i = 0; i < allProducts.length; i += BATCH) {
-      const batch = allProducts.slice(i, i + BATCH);
-      const results = await Promise.allSettled(
-        batch.map(async (prod) => {
-          // Fetch product JSON to determine type + get full data
-          const prodJsonResp = await fetch(`${base}/products/${prod.handle}.json`);
-          const prodData = await prodJsonResp.json();
-          const product = prodData.product;
-          if (!product) return [];
-
-          if (product.variants && product.variants.length > 1) {
-            // Variable product: fetch page HTML for hex color codes
-            const pageResp = await fetch(`${base}/products/${prod.handle}`);
-            const productHtml = await pageResp.text();
-            const hexByValue = new Map();
-            for (const m of productHtml.matchAll(/name="Color"\s+value="([^"]+)"[\s\S]{0,260}?--option-color:\s*(#[0-9a-fA-F]{3,8})/g)) {
-              hexByValue.set(decodeEntities(m[1].trim()), m[2]);
-            }
-            const allImages = (product.images || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
-            const imgById = new Map(allImages.map(im => [im.id, normalizeShopUrl(im.src)]));
-            const sharedImages = allImages.filter(im => !(im.variant_ids || []).length && !/swatch/i.test(im.src.split('/').pop()))
-              .map(im => normalizeShopUrl(im.src));
-            const v0 = product.variants[0];
-            const v0src = v0 && v0.featured_image ? v0.featured_image.src : '';
-            const v0img = v0src && !/swatch/i.test(v0src) ? normalizeShopUrl(v0src) : '';
-            const parentImages = [...new Set([v0img, ...sharedImages].filter(Boolean))].slice(0, 4);
-            const variants = product.variants.map(v => {
-              const mainImg = v.featured_image ? normalizeShopUrl(v.featured_image.src)
-                : (v.image_id && imgById.has(v.image_id) ? imgById.get(v.image_id) : (parentImages[0] || ''));
-              const price = fmtPrice(v.price);
-              const compareAt = v.compare_at_price && parseFloat(v.compare_at_price) > 0 ? fmtPrice(v.compare_at_price) : '';
-              return {
-                name: v.option1,
-                sku: v.sku || '',
-                regularPrice: compareAt || price,
-                salePrice: compareAt ? price : '',
-                images: mainImg ? [mainImg] : [],
-                extras: [],
-                colorCode: hexByValue.get(v.option1) || ''
-              };
-            });
-            const optName = product.options && product.options[0] ? product.options[0].name : 'Color';
-            const rows = variableRows(product.title, parentImages, '', '', product.product_type || '', optName, variants);
-            rows.forEach(r => { r['Product URL'] = `${base}/products/${prod.handle}`; });
-            return rows;
-          } else {
-            // Simple product
-            const variant = product.variants && product.variants[0] ? product.variants[0] : {};
-            const price = fmtPrice(variant.price || 0);
-            const compareAt = variant.compare_at_price && parseFloat(variant.compare_at_price) > 0 ? fmtPrice(variant.compare_at_price) : '';
-            const images = (product.images || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0))
-              .filter(im => !/swatch/i.test(im.src.split('/').pop()))
-              .map(im => normalizeShopUrl(im.src));
-            const row = simpleRow({
-              sku: variant.sku || '',
-              name: product.title || '',
-              categories: product.product_type || '',
-              images,
-              price: compareAt || price
-            });
-            row.forEach(r => { r['Product URL'] = `${base}/products/${prod.handle}`; });
-            return row;
-          }
-        })
-      );
-
-      for (const r of results) {
-        if (r.status === 'fulfilled' && Array.isArray(r.value)) {
-          allRows.push(...r.value);
-        } else if (r.status === 'rejected') {
-          errors.push(`${allProducts[i]?.handle || 'unknown'}: ${r.reason?.message || String(r.reason)}`);
-        }
-      }
-    }
-
-    return { ok: true, rows: allRows, totalProducts: allProducts.length, errors };
-  }
-
-  const DISCOVERERS = {
-    seventeen: discoverSeventeen,
-    maybelline: discoverMaybelline,
-    elf: discoverElf,
-    nyx: discoverNyx,
-    pastel: discoverPastel,
-  };
-
-  async function discoverAll(ctx) {
-    const site = ctx.site || detectSite(ctx.url);
-    const fn = DISCOVERERS[site];
-    if (!fn) throw new Error('No bulk discovery for site: ' + (site || '(unknown)'));
-    return await fn(ctx);
   }
 
   // ── LaCabine (PrestaShop — ld+json Product with offers.image gallery) ──────
@@ -5271,7 +4823,7 @@
 
     // 5. Price — use first offer's price
     const offers = Array.isArray(ldProduct.offers) ? ldProduct.offers : [ldProduct.offers];
-    let price = '15';
+    let price = '';
     if (offers.length && offers[0].price != null) {
       const p = parseFloat(offers[0].price);
       if (isFinite(p)) price = p.toFixed(2);
@@ -5860,6 +5412,130 @@
     return { rows: variableRows(title, parentImages, description, '', categories, optionName, variants), title };
   }
 
+  // ── Universal WooCommerce (generic fallback for any WooCommerce site) ──────
+  function isWooCommerce(html) {
+    return /woocommerce-product-gallery|single_add_to_cart_button|data-product_variations|wp-content\/plugins\/woocommerce|woocommerce-breadcrumb/i.test(html);
+  }
+
+  function wooProductLd(html) {
+    for (const raw of ldBlocks(html)) {
+      try {
+        const j = JSON.parse(raw);
+        for (const n of (j['@graph'] || [j])) {
+          if (/Product/.test(n['@type'] || '')) return n;
+        }
+      } catch (e) {}
+    }
+    return null;
+  }
+  function wooImages(html, product) {
+    const out = [];
+    if (product && product.image) {
+      const arr = Array.isArray(product.image) ? product.image : [product.image];
+      for (const x of arr) out.push(typeof x === 'string' ? x : (x && x.url));
+    }
+    if (!out.length) {
+      const g = html.match(/<div[^>]*class="[^"]*woocommerce-product-gallery[^"]*"[\s\S]*?<\/div>/i);
+      if (g) for (const m of g[0].matchAll(/<img[^>]*\ssrc="([^"]+)"/gi)) out.push(m[1]);
+    }
+    return [...new Set(out.filter(Boolean).map(u => normalizeShopUrl(u).split('?')[0]))];
+  }
+  function wooBreadcrumb(html, product) {
+    const bc = html.match(/<nav[^>]*class="[^"]*woocommerce-breadcrumb[^"]*"[^>]*>([\s\S]*?)<\/nav>/i);
+    if (bc) {
+      const cats = [...bc[1].matchAll(/<a\b[^>]*>([^<]+)<\/a>/gi)]
+        .map(m => decodeEntities(m[1].trim()))
+        .filter(c => c && !/^home$/i.test(c));
+      if (cats.length) return cats.join(' > ');
+    }
+    if (product && product.category) return String(product.category);
+    return '';
+  }
+  function wooTitle(html, product) {
+    if (product && product.name) return decodeEntities(String(product.name));
+    const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
+    return decodeEntities((h1 ? h1[1] : '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+  }
+  function wooPrices(html, product) {
+    let regular = '', sale = '';
+    if (product && product.offers) {
+      const o = Array.isArray(product.offers) ? product.offers[0] : product.offers;
+      if (o) regular = fmtPrice(o.price);
+    }
+    if (!regular) {
+      const delM = html.match(/<del[^>]*>([\s\S]*?)<\/del>/);
+      const insM = html.match(/<ins[^>]*>([\s\S]*?)<\/ins>/);
+      if (delM && insM) { regular = woocommercePrice(delM[1]); sale = woocommercePrice(insM[1]); }
+      else regular = woocommercePrice((html.match(/woocommerce-Price-amount[^>]*>([\s\S]*?)<\/span>/) || [])[1]);
+    }
+    return { regular, sale };
+  }
+
+  async function scrapeUniversalWooSimple(ctx) {
+    const html = ctx.mainHtml;
+    const product = wooProductLd(html);
+    const title = wooTitle(html, product);
+    const description = product && product.description
+      ? decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim())
+      : '';
+    const sku = (product && product.sku) || (html.match(/class="sku"[^>]*>([^<]+)</) || [])[1] || '';
+    const images = wooImages(html, product);
+    const categories = wooBreadcrumb(html, product);
+    const { regular, sale } = wooPrices(html, product);
+    return { rows: simpleRow({ sku, name: title, description, regularPrice: regular, salePrice: sale, categories, images }), title };
+  }
+
+  function universalVariations(html) {
+    const m = html.match(/<form[^>]*class="[^"]*variations_form[^"]*"[\s\S]*?data-product_variations="([^"]*)"/i)
+      || html.match(/data-product_variations="([^"]*)"/i);
+    if (!m) return null;
+    try {
+      return JSON.parse(m[1].replace(/&quot;/g, '"').replace(/&#34;/g, '"').replace(/&amp;/g, '&'));
+    } catch (e) {
+      try { return JSON.parse(decodeEntities(m[1])); } catch (e2) { return null; }
+    }
+  }
+  async function scrapeUniversalWooVariable(ctx) {
+    const html = ctx.mainHtml;
+    const variations = universalVariations(html);
+    const product = wooProductLd(html);
+    if (!Array.isArray(variations) || !variations.length) return await scrapeUniversalWooSimple(ctx);
+
+    const title = wooTitle(html, product);
+    const description = product && product.description
+      ? decodeEntities(product.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim())
+      : '';
+    const parentImages = wooImages(html, product);
+    const categories = wooBreadcrumb(html, product);
+
+    let optionName = (html.match(/data-attribute_name="([^"]*)"/i) || [])[1] || '';
+    if (!optionName && variations[0] && variations[0].attributes) {
+      optionName = Object.keys(variations[0].attributes)[0] || '';
+    }
+    optionName = decodeEntities(optionName.replace(/^attribute_/, '').replace(/^pa_/, '').replace(/-/g, ' ').trim());
+    if (!optionName) optionName = 'Option';
+
+    const variants = variations.map(v => {
+      const attrs = v.attributes || {};
+      const name = decodeEntities(attrs[Object.keys(attrs)[0]] || v.variation_id || '');
+      const regular = fmtPrice(v.display_regular_price);
+      const price = fmtPrice(v.display_price);
+      const sale = regular && price && parseFloat(price) < parseFloat(regular) ? price : '';
+      const img = v.image && v.image.full_src ? normalizeShopUrl(v.image.full_src).split('?')[0] : '';
+      return {
+        name: name || 'Default',
+        sku: v.sku || '',
+        regularPrice: regular || '',
+        salePrice: sale,
+        images: img ? [img] : [],
+        extras: [],
+        colorCode: ''
+      };
+    });
+
+    return { rows: variableRows(title, parentImages, description, '', categories, optionName, variants), title };
+  }
+
   // ── Dispatch ─────────────────────────────────────────────────────────────
   const SCRAPERS = {
     nyx: { variable: scrapeNyx, simple: scrapeNyxSimple },
@@ -5933,6 +5609,7 @@
     celenes: { variable: scrapeCelenesSimple, simple: scrapeCelenesSimple },
     everymarket: { variable: scrapeEverymarketSimple, simple: scrapeEverymarketSimple },
     clara: { variable: scrapeClaraVariable, simple: scrapeClaraVariable },
+    woo: { variable: scrapeUniversalWooVariable, simple: scrapeUniversalWooSimple },
   };
 
   // Detect site from a URL hostname.
@@ -5997,45 +5674,70 @@
   }
 
   async function scrapeProduct(ctx) {
-    const site = ctx.site || detectSite(ctx.url);
-    const type = ctx.productType === 'simple' ? 'simple' : 'variable';
-    const entry = SCRAPERS[site];
+    let site = ctx.site || detectSite(ctx.url);
+    let entry = SCRAPERS[site];
+    if (!entry && isWooCommerce(ctx.mainHtml)) { site = 'woo'; entry = SCRAPERS.woo; }
     if (!entry) throw new Error('No scraper for site: ' + (site || '(unknown)'));
-    const fn = entry[type] || entry.variable || entry.simple;
-    return await fn(ctx);
+    const requested = ctx.productType === 'simple' ? 'simple' : (ctx.productType === 'variable' ? 'variable' : 'auto');
+    if (requested === 'simple') {
+      const fn = entry.simple || entry.variable;
+      const out = await fn(ctx);
+      out.site = site; if (site === 'woo') out.brand = 'Universal Woocommerce';
+      return out;
+    }
+    if (requested === 'variable') {
+      const fn = entry.variable || entry.simple;
+      const out = await fn(ctx);
+      out.site = site; if (site === 'woo') out.brand = 'Universal Woocommerce';
+      return out;
+    }
+    // Auto: run the variable scraper first, then fall back to the simple scraper
+    // when the page isn't a true variable product (no multi-variant options).
+    const fn = entry.variable || entry.simple;
+    const out = await fn(ctx);
+    if (entry.variable && entry.simple && entry.simple !== entry.variable) {
+      const variations = (out.rows || []).filter(r => r && r.Type === 'variation');
+      if (variations.length <= 1) {
+        const out2 = await entry.simple(ctx);
+        out2.site = site; if (site === 'woo') out2.brand = 'Universal Woocommerce';
+        return out2;
+      }
+    }
+    out.site = site; if (site === 'woo') out.brand = 'Universal Woocommerce';
+    return out;
   }
 
   // Catalogue of brands the tool knows. `ready` = scraper implemented in the
   // extension; others are on the roadmap (server-only for now).
   const BRANDS = [
-    { name: 'NYX Professional Makeup', domain: 'nyxcosmetics.com', key: 'nyx', discover: true, example: 'https://www.nyxcosmetics.com/lip/lip-gloss-pouch/USNYX_44.html' },
-    { name: 'e.l.f. Cosmetics', domain: 'elfcosmetics.com', key: 'elf', discover: true, example: 'https://www.elfcosmetics.com/products/smoky-kohl-eyeliner?Color=Black+Velvet' },
+    { name: 'NYX Professional Makeup', domain: 'nyxcosmetics.com', key: 'nyx', example: 'https://www.nyxcosmetics.com/lip/lip-gloss-pouch/USNYX_44.html' },
+    { name: 'e.l.f. Cosmetics', domain: 'elfcosmetics.com', key: 'elf', example: 'https://www.elfcosmetics.com/products/smoky-kohl-eyeliner?Color=Black+Velvet' },
     { name: 'Huda Beauty', domain: 'hudabeauty.com', key: 'huda', example: 'https://hudabeauty.com/en-jo/products/easy-blur-natural-airbrush-foundation-with-niacinamide-hb01166m?variant=50573350273302' },
-    { name: 'Pastel', domain: 'pastelarabia.com', key: 'pastel', example: 'https://pastelarabia.com/collections/foundation/products/silky-dream-foundation', discover: true },
-    { name: 'Glow Recipe', domain: 'glowrecipe.com', key: 'glowrecipe' },
-    { name: 'Inglot', domain: 'inglotcosmetics.com', key: 'inglot' },
-    { name: 'Maybelline', domain: 'maybelline.com', key: 'maybelline', discover: true, example: 'https://www.maybelline.com/face-makeup/foundation-makeup/fit-me-matte-poreless-foundation?variant=334' },
-    { name: 'Maybelline SA', domain: 'maybelline.co.za', key: 'maybellineza', discover: false },
+    { name: 'Pastel', domain: 'pastelarabia.com', key: 'pastel', example: 'https://pastelarabia.com/collections/foundation/products/silky-dream-foundation' },
+    { name: 'Glow Recipe', domain: 'glowrecipe.com', key: 'glowrecipe', example: 'https://www.glowrecipe.com/products/watermelon-glow-niacinamide-dew-drops' },
+    { name: 'Inglot', domain: 'inglotcosmetics.com', key: 'inglot', example: 'https://inglotcosmetics.com/en/eyeliners/99-amc-eyeliner-gel' },
+    { name: 'Maybelline', domain: 'maybelline.com', key: 'maybelline', example: 'https://www.maybelline.com/face-makeup/foundation-makeup/fit-me-matte-poreless-foundation?variant=334' },
+    { name: 'Maybelline SA', domain: 'maybelline.co.za', key: 'maybellineza', example: 'https://www.maybelline.co.za/face-makeup/foundation/fit-me-matte-poreless-foundation' },
     { name: 'Flormar', domain: 'flormar.com', key: 'flormar', example: 'https://www.flormar.com/perfect-coverage-liquid-concealer--ivory-002/' },
     { name: "L'Oréal Paris", domain: 'lorealparisusa.com', key: 'lorealparis', example: 'https://www.lorealparisusa.com/makeup/face/concealer/true-match-radiant-serum-concealer' },
-    { name: 'My Loreal Paris', domain: 'lorealparis.com.my', key: 'mylorealparis', discover: false },
-    { name: 'Vichy', domain: 'vichy-me.com', key: 'vichy' },
-    { name: 'La Roche-Posay', domain: 'laroche-posay.us', key: 'larocheposay' },
-    { name: 'Urban Care', domain: 'urbancare.ro', key: 'urbancare' },
-    { name: 'Urban Care TR', domain: 'urbancare.com.tr', key: 'urbancaretr' },
-    { name: 'Urban Care CL', domain: 'cliqat.com', key: 'urbancarecl' },
-    { name: 'Urban Care S', domain: 'makeupstore.com', key: 'urbancares' },
-    { name: 'Bielenda', domain: 'bielenda.pl', key: 'bielenda' },
+    { name: 'My Loreal Paris', domain: 'lorealparis.com.my', key: 'mylorealparis', example: 'https://www.lorealparis.com.my/infallible/infallible-32h-freshwear-foundation-330' },
+    { name: 'Vichy', domain: 'vichy-me.com', key: 'vichy', example: 'https://www.vichy-me.com/en-ae/all-products/skincare/face-serums/dryness/mineral-89-booster' },
+    { name: 'La Roche-Posay', domain: 'laroche-posay.us', key: 'larocheposay', example: 'https://www.laroche-posay.us/our-products/sun/face-sunscreen/anthelios-uv-correct-face-sunscreen-spf-70-with-niacinamide-3606000591035.html' },
+    { name: 'Urban Care', domain: 'urbancare.ro', key: 'urbancare', example: 'https://urbancare.ro/en/product/biotin-keratin-hair-care-shampoo/' },
+    { name: 'Urban Care TR', domain: 'urbancare.com.tr', key: 'urbancaretr', example: 'https://urbancare.com.tr/argan-oil-keratin-sac-bakim-kremi-250-ml' },
+    { name: 'Urban Care CL', domain: 'cliqat.com', key: 'urbancarecl', example: 'https://www.cliqat.com/products/urban-care-coconut-coffee-body-wash-500ml' },
+    { name: 'Urban Care S', domain: 'makeupstore.com', key: 'urbancares', example: 'https://makeupstore.com/product/761377/' },
+    { name: 'Bielenda', domain: 'bielenda.pl', key: 'bielenda', example: 'https://bielenda.pl/en/catalog/firming-peptides/1452-firming-peptides-cream-70' },
     { name: 'Sephora', domain: 'sephora.com', key: 'sephora', example: 'https://www.sephora.com/product/tinted-moisturizer-oil-free-blurred-matte-spf-30-P515711?skuId=2854479&icid2=products%20grid:p515711:product' },
-    { name: 'CeraVe', domain: 'cerave.com', key: 'cerave' },
+    { name: 'CeraVe', domain: 'cerave.com', key: 'cerave', example: 'https://www.cerave.com/skincare/moisturizers/moisturizing-cream' },
     { name: 'NARS', domain: 'narscosmetics.com', key: 'nars', example: 'https://www.narscosmetics.com/USA/natural-matte-longwear-foundation/999NAC0000285.html?dwvar_999NAC0000285_color=4251155135&cgid=foundation' },
-    { name: 'Seventeen Cosmetics', domain: 'seventeencosmetics.com', key: 'seventeen', discover: true, example: 'https://seventeencosmetics.com/en/catalogue/skin-perfect-ultra-coverage-waterproof-foundation_23/?vid=24#All' },
+    { name: 'Seventeen Cosmetics', domain: 'seventeencosmetics.com', key: 'seventeen', example: 'https://seventeencosmetics.com/en/catalogue/skin-perfect-ultra-coverage-waterproof-foundation_23/?vid=24#All' },
     { name: 'Radiant Professional', domain: 'radiant-professional.com', key: 'radiant', example: 'https://radiant-professional.com/en/catalogue/NATURAL_FIX_CONCEALER_670/' },
-    { name: 'Misslyn Cosmetics', domain: 'misslyn.com', key: 'misslyn' },
+    { name: 'Misslyn Cosmetics', domain: 'misslyn.com', key: 'misslyn', example: 'https://www.misslyn.com/products/made-to-stay-foundation-water-resistant-foundation' },
     { name: 'essence makeup', domain: 'essencemakeup.com', key: 'essence', example: 'https://essencemakeup.com/collections/face/products/correct-conceal-under-eye-brightening-concealer' },
     { name: 'Charlotte Tilbury', domain: 'charlottetilbury.com', key: 'charlottetilbury', example: 'https://www.charlottetilbury.com/uk/product/airbrush-flawless-foundation-shade-1-cool?from_multi_product_card=true' },
     { name: 'Dior Makeup', domain: 'dior.com', key: 'dior', url: 'https://www.dior.com/en_int/beauty', example: 'https://www.dior.com/en_int/beauty/products/dior-forever-skin-correct-Y0326000.html' },
-    { name: 'Summer Fridays', domain: 'summerfridays.com', key: 'summerfridays' },
+    { name: 'Summer Fridays', domain: 'summerfridays.com', key: 'summerfridays', example: 'https://summerfridays.com/products/jet-lag-mask' },
     { name: 'Character Cosmetics', domain: 'charactercosmetics.in', key: 'character', example: 'https://charactercosmetics.in/products/character-hyaluronic-acid-high-coverage-foundation' },
     { name: 'IsaDora', domain: 'isadora.com', key: 'isadora', example: 'https://www.isadora.com/products/face/powder/the-no-compromise-matte-longwear-powder/60-neutral-porcelain' },
     { name: 'Topface', domain: 'topfaceofficial.com', key: 'topface', example: 'https://topfaceofficial.com/products/aqua-tint-lip-cheek' },
@@ -6047,14 +5749,14 @@
     { name: 'Dermaliscio', domain: 'dermaliscio.net', key: 'dermaliscio', example: 'https://dermaliscio.net/product/hyaluronic-acid-anti-wrinkles-lifting-cream-15000-p-p-m-dermaliscio-shade-50-sunscreen/' },
     { name: 'Babaria', domain: 'babaria.es', key: 'babaria', example: 'https://babaria.es/en/producto/face-serum-collagen/' },
     { name: 'Sarah K', domain: 'sarahk.com.br', key: 'sarahk', example: 'https://www.sarahk.com.br/produto/condicionador-basic-care-3600ml-2' },
-    { name: 'Sarah K International', domain: 'sarahkinternational.com', key: 'sarahkintl' },
-    { name: 'Sarah K Store', domain: 'sarahkstore.com', key: 'sarahkstore' },
+    { name: 'Sarah K International', domain: 'sarahkinternational.com', key: 'sarahkintl', example: 'https://sarahkinternational.com/product/acondicionador-treatment/' },
+    { name: 'Sarah K Store', domain: 'sarahkstore.com', key: 'sarahkstore', example: 'https://sarahkstore.com/product/blends-bb-cream-250ml/' },
     { name: 'Shea Miracles', domain: 'sheamiracles.com', key: 'sheamiracles', example: 'https://sheamiracles.com/shea-hair-conditioner-300ml-1.html' },
-    { name: 'Skala Brasil', domain: 'skalabrasil.com', key: 'skalabrasil' },
-    { name: 'Skinarte', domain: 'dermoconcept.pl', key: 'skinarte' },
-    { name: 'Beauty Box', domain: 'beautyboxjo.com', key: 'beautybox' },
-    { name: 'SVR 1', domain: 'easypara.com', key: 'svr1' },
-    { name: 'Olaplex', domain: 'olaplex.com', key: 'olaplex' },
+    { name: 'Skala Brasil', domain: 'skalabrasil.com', key: 'skalabrasil', example: 'https://skalabrasil.com/en/product/amido-de-milho-573' },
+    { name: 'Skinarte', domain: 'dermoconcept.pl', key: 'skinarte', example: 'https://dermoconcept.pl/kremy-zele-do-twarzy/14865-skinarte-resurfacing-smoothsebcontrol-cream-50ml-5902169052980.html' },
+    { name: 'Beauty Box', domain: 'beautyboxjo.com', key: 'beautybox', example: 'https://beautyboxjo.com/products/makeover-sheer-bronzing-powder' },
+    { name: 'SVR 1', domain: 'easypara.com', key: 'svr1', example: 'https://www.easypara.com/easy-stick-spf50-10ml-sun-secure-svr.html' },
+    { name: 'Olaplex', domain: 'olaplex.com', key: 'olaplex', example: 'https://olaplex.com/products/n-3plus-complete-repair-treatment' },
     { name: 'Diego dalla Palma', domain: 'diegodallapalma.com', key: 'diegodallapalma', example: 'https://diegodallapalma.com/en/products/matita-sopracciglia-alta-precisione-resistente-all-acqua-lunga-tenuta-df12001-master' },
     { name: 'Eucerin', domain: 'eucerin-me.com', key: 'eucerin', example: 'https://www.en.eucerin-me.com/products/dermopure-clinical/scrub' },
     { name: 'ISDIN', domain: 'isdin.com', key: 'isdin', example: 'https://www.isdin.com/en-AE/product/isdinceutics/age-reverse-night' },
@@ -6071,15 +5773,15 @@
     { name: 'Makeover Pakistan', domain: 'makeoverpakistan.com', key: 'makeoverpakistan', example: 'https://www.makeoverpakistan.com/shop/high-perfection-foundation' },
     { name: 'Care To Beauty', domain: 'caretobeauty.com', key: 'caretobeauty', example: 'https://www.caretobeauty.com/jo/bell-hypoallergenic-soft-cream-concealer-02-vanilla-5-5g/' },
     { name: 'Notino', domain: 'notino.co.uk', key: 'notino', example: 'https://www.notino.co.uk/mac-cosmetics/macximal-sleek-satin-lipstick-mini-satin-lipstick-for-the-perfect-look/' },
-    { name: 'Dumyah', domain: 'dumyah.com', key: 'dumyah' },
-    { name: 'Semsem', domain: 'semsem.me', key: 'semsem' },
-    { name: 'Galaxus', domain: 'galaxus.ch', key: 'galaxus' },
-    { name: 'Carrefour', domain: 'carrefouruae.com', key: 'carrefour' },
-    { name: 'Enzo', domain: 'enzoitaly.com', key: 'enzo' },
-    { name: 'Celenes', domain: 'celenesbysweden.com', key: 'celenes' },
-    { name: 'Everymarket', domain: 'everymarket.com', key: 'everymarket' },
-    { name: 'Clara', domain: 'musejo.com', key: 'clara' },
+    { name: 'Dumyah', domain: 'dumyah.com', key: 'dumyah', example: 'https://www.dumyah.com/en/beauty/hair-body-amp-skin-care/facial-care/natural-glow-facial-moisturizing-cream' },
+    { name: 'Semsem', domain: 'semsem.me', key: 'semsem', example: 'https://semsem.me/jo_en/nem-collagen-natural-eggshell-membrane-capsule-30-caps.html' },
+    { name: 'Galaxus', domain: 'galaxus.ch', key: 'galaxus', example: 'https://www.galaxus.ch/de/s6/product/avene-dermabsolu-serum-30-ml-gesichtsserum-49739066' },
+    { name: 'Carrefour', domain: 'carrefouruae.com', key: 'carrefour', example: 'https://www.carrefouruae.com/mafuae/en/foundations/l-oreal-inf-liq-fou-0130-beige/p/1159838' },
+    { name: 'Enzo', domain: 'enzoitaly.com', key: 'enzo', example: 'https://www.enzoitaly.com/' },
+    { name: 'Celenes', domain: 'celenesbysweden.com', key: 'celenes', example: 'https://int.celenesbysweden.com/products/thermal-daily-care-gel-cream' },
+    { name: 'Everymarket', domain: 'everymarket.com', key: 'everymarket', example: 'https://everymarket.com/products/elf-cosmetics-moisturizing-lipstick-provides-vibrant-color-and-luminous-shine-flirty-and-fabulous' },
+    { name: 'Clara', domain: 'musejo.com', key: 'clara', example: 'https://musejo.com/products/clara-line-nail-polish' },
   ].map(b => ({ ...b, ready: !!SCRAPERS[b.key], resize: true }));
 
-  root.ProductScraper = { scrapeProduct, discoverAll, detectSite, decodeEntities, brands: BRANDS, DISCOVERERS, scrapePastelCollection };
+  root.ProductScraper = { scrapeProduct, detectSite, decodeEntities, brands: BRANDS, SCRAPERS };
 })(typeof self !== 'undefined' ? self : this);

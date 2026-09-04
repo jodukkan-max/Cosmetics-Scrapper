@@ -105,9 +105,12 @@ async function discoverBrand(ctx) {
 
 ### Variable row structure
 ```
-Parent row: ID, Parent: '', Type: 'variable', SKU: '', Name, Images, Description, Short Description, Categories, Regular Price, Sale Price, Attribute 1 name, Attribute 1 value(s), Color Code
-Child rows: ID, Parent: 'id:N', Type: 'variation', SKU, Name, Images (1st only), Regular Price, Sale Price, Attribute 1 name, Attribute 1 value(s), Color Code
+Parent row: ID, Parent: '', Type: 'variable', SKU: '', Name, Images, Description, Short Description, Categories, Regular Price, Sale Price, Attribute 1 name, Attribute 1 value(s), Attribute 2 name, Attribute 2 value(s), Color Code
+Child rows: ID, Parent: 'id:N', Type: 'variation', SKU, Name, Images (1st only), Regular Price, Sale Price, Attribute 1 name, Attribute 1 value(s), Attribute 2 name, Attribute 2 value(s), Color Code
 ```
+
+`Attribute 2 name` / `Attribute 2 value(s)` are the SECOND attribute of any multi-attribute
+product (e.g. color + size, material + size). They are empty for single-attribute products.
 
 ---
 

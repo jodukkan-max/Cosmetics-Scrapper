@@ -1,13 +1,13 @@
-# Cosmetics Scraper — Chrome Extension
+# Universal Scrapper — Chrome Extension
 
 Scrapes cosmetics product pages into WooCommerce‑ready rows (variable + simple,
-with color/image swatches), saves a **bulk queue** across pages, and exports via
-**Copy / CSV** or imports to one or more saved **WooCommerce stores**.
+with color/image swatches), and exports via **Copy / CSV** or imports to one or
+more saved **WooCommerce stores**.
 
-This extension runs **entirely on your computer, inside Chrome**. It does **not**
-depend on Claude/Anthropic or any external service — it only talks to the product
-sites you scrape and your own WooCommerce store(s). It will keep working
-indefinitely with no subscription of any kind.
+This extension scrapes in‑browser. Scraper code and the shared brand registry are
+served from **Supabase** (see `../supabase/`); the AI "Add new Scrapper" feature
+uses a Supabase Edge Function that proxies DeepSeek (the API key is stored only
+in the function secret, never in the extension).
 
 ## Install (load unpacked)
 1. Open Chrome → go to `chrome://extensions`
@@ -19,20 +19,18 @@ indefinitely with no subscription of any kind.
 > starts, so don't delete or move it (or re‑load it if you do).
 
 ## Use
-- **Scrape:** open a product page → **Scrape this page** (best for bot‑protected
-  sites), or paste a URL and tap **Go**. Toggle **Variable / Simple** first.
-- **Bulk:** after scraping, tap **+ Bulk** to queue it. Repeat across pages.
-  The **Bulk** tab lets you **Copy all / CSV all / Import all**.
-- **Stores:** add your WooCommerce store(s) (name, URL, consumer key/secret, and
-  WP username + application password for CSV import). Saved in the browser.
+- **Scrape:** open a product page → **Scrape this page**. Toggle **Variable / Simple** first.
+- **Stores:** add your WooCommerce store(s) (name, URL, auth key for CSV import). Saved in the browser.
 
 ## Files
 - `manifest.json` — extension config (Manifest V3)
-- `background.js` — runs scrapers (page or background) + WooCommerce calls
-- `scrapers.js` — all per‑site scraping logic
+- `background.js` — orchestrates scraping + WooCommerce calls
+- `supabase.js` — Supabase client (scraper registry + DeepSeek proxy)
+- `brands.js` — lightweight brand catalog for the Websites tab
 - `sidepanel.html` / `sidepanel.css` / `sidepanel.js` — the UI
 
 ## Maintenance note
-Websites occasionally change their HTML, which can break a scraper. Fixing that
-means editing `scrapers.js`. If you can't do that yourself, keep this README and
-the code so any developer can pick it up.
+Websites occasionally change their HTML, which can break a scraper. Predefined
+scraper code lives in `../supabase/predefined/scrapers.js` and is uploaded to
+Supabase via `../upload-module.mjs`; the extension fetches and caches it.
+

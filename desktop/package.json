@@ -1,0 +1,15 @@
+{
+  "name": "universal-scrapper-desktop",
+  "version": "1.0.0",
+  "description": "Standalone desktop scraper — opens a product URL in an embedded browser and runs the AI scraper core. Anonymous, no login.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node ../test-desktop-core.mjs"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "devDependencies": {
+    "electron": "44.0.0"
+  }
+}
