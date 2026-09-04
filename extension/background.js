@@ -228,6 +228,12 @@ function jsonLdCore(ctx, type){
   }
   return { rows: variableRows(name, imgs, desc, cats, 'Option', [], ''), title: name };
 }
+// Defensive sanitization shims. Some older AI-generated scrapers (or scrapers
+// saved by earlier builds) reference sanitizeRows(...) / cleanImageList(...)
+// directly. These are defined here so such code still runs instead of throwing
+// "sanitizeRows is not defined".
+function cleanImageList(arr){ if(!Array.isArray(arr)) return []; return arr.map(function(u){ return String(u==null?'':u).trim(); }).filter(function(u){ return u!=='' && u.indexOf('$')<0 && u.indexOf('{')<0 && u.indexOf('}')<0 && (u.indexOf('http://')===0 || u.indexOf('https://')===0 || u.indexOf('//')===0 || u.indexOf('data:')===0); }); }
+function sanitizeRows(rows){ if(!Array.isArray(rows)) return []; if(rows.some(function(r){ return Array.isArray(r); })){ var f=[]; for(var i=0;i<rows.length;i++){ if(Array.isArray(rows[i])) f=f.concat(rows[i]); else f.push(rows[i]); } rows=f; } return rows.map(function(r){ if(!r || typeof r!=='object') return r; var c=Object.assign({},r); if(Array.isArray(c.Images)) c.Images=cleanImageList(c.Images); if(Array.isArray(c['Rey Variations extra images'])) c['Rey Variations extra images']=cleanImageList(c['Rey Variations extra images']); return c; }); }
 `;
 
 function buildScraperBody(runBody) {
