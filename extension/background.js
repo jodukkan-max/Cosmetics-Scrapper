@@ -518,43 +518,6 @@ function parseChatReply(text) {
   return { reply: reply || (code ? '' : 'Done.'), code };
 }
 
-// Drop obviously-broken image URLs a scraper may have produced (e.g. a template
-// placeholder like "$img" or "${img}" matched from inline <script> markup). A
-// single bad URL otherwise makes WooCommerce reject the ENTIRE product.
-function cleanImageList(arr) {
-  if (!Array.isArray(arr)) return [];
-  return arr
-    .map(u => String(u == null ? '' : u).trim())
-    .filter(u => u !== '' && u.indexOf('$') < 0 && u.indexOf('{') < 0 && u.indexOf('}') < 0 &&
-      (u.startsWith('http://') || u.startsWith('https://') || u.startsWith('//') || u.startsWith('data:')));
-}
-
-// Sanitize scraped rows: flatten an accidental double-wrap and clean every
-// image-bearing field so one bad URL can't block an import. Applied to every
-// scraper (custom AI, predefined, generated).
-function sanitizeRows(rows) {
-  if (!Array.isArray(rows)) return [];
-  // The model sometimes emits `rows: [ simpleRow({...}) ]` (or
-  // `[ variableRows(...) ]`) — a nested array — because the helper already
-  // returns an array. That double-wrap makes rows[0] an array, so the validator
-  // reports "missing name" even though the data is perfect, and the agent loops
-  // forever. Unwrap one level: concat top-level array elements, keep objects.
-  // (This never touches per-row "Images" arrays, which live INSIDE objects.)
-  if (rows.some(r => Array.isArray(r))) {
-    const flat = [];
-    for (const r of rows) { if (Array.isArray(r)) flat.push(...r); else flat.push(r); }
-    rows = flat;
-  }
-  return rows.map(r => {
-    if (!r || typeof r !== 'object') return r;
-    const c = Object.assign({}, r);
-    for (const k of ['Images', 'Rey Variations extra images']) {
-      if (Array.isArray(c[k])) c[k] = cleanImageList(c[k]);
-    }
-    return c;
-  });
-}
-
 // Runs a generated scraper body in the page's MAIN world. `new Function` (eval)
 // is forbidden in MV3 extension pages/service workers (no 'unsafe-eval'), but is
 // allowed in the page's own JS context. The page HTML is passed in as an argument
@@ -562,8 +525,7 @@ function sanitizeRows(rows) {
 // and never depends on the page's own CSP for content.
 // NOTE: this function is serialized by chrome.scripting.executeScript and run in
 // the page's MAIN world — it can ONLY reference itself (no outer scope), so the
-// sanitization helpers are INLINED below (do not call sanitizeRows/cleanImageList
-// here; they are not available in the injected context).
+// sanitization helpers are INLINED below as `sanitize` / `cleanImages`.
 function evalScraperInMain(code, productType, html) {
   return (async () => {
     // Inlined (self-contained) sanitization: drop placeholder image URLs and
@@ -650,7 +612,7 @@ function extractJson(raw) {
 // Build a deterministic run body that reconstructs rows from the extracted
 // core/variants data. We reuse the existing simpleRow/variableRows helpers so
 // the output is normalized exactly like an AI-written scraper, and the rows
-// still pass through sanitizeRows() in the injected runner.
+// still pass through the inlined `sanitize()` in the injected runner.
 function buildDataBody(type, core, variants) {
   const c = JSON.stringify(core || {});
   if (type === 'simple') {
@@ -726,7 +688,7 @@ async function generateScraper({ tabId, url, productType }) {
     }
 
     // Reconstruct normalized rows from the extracted data (deterministic, and
-    // still passes through sanitizeRows() in the injected runner).
+    // still passes through the inlined `sanitize()` in the injected runner).
     sendThinking('Building the product table…');
     const dataBody = buildDataBody(effectiveType, core, variants);
     const dataRun = buildScraperBody(dataBody);
